@@ -1,8 +1,8 @@
-require('dotenv').config();  // Load environment variables from .env file
+require('dotenv').config(); // Load environment variables from .env file
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const apiRoutes = require('./routes/apiRoutes'); // Routes for different API endpoints
+const apiRoutes = require('./routes/apiRoutes'); // Ensure this is pointing to the right path
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -11,7 +11,7 @@ app.use(cors());
 app.use(bodyParser.json()); // Parse JSON bodies
 
 // Use the API routes
-app.use('/api', apiRoutes);
+app.use('/api/v1', apiRoutes); // All your routes will start with /api/v1
 
 // Start the server
 app.listen(port, () => {
