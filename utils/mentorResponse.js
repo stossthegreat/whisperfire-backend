@@ -1,37 +1,25 @@
-// utils/mentorResponse.js
-// Generates mentor persona responses
+const EventEmitter = require('events');
 
+// Function to generate the mentor response stream
 exports.generateMentorResponse = (mentor, userText, preset, options) => {
-    const persona = getPersonaForMentor(mentor);
+    const emitter = new EventEmitter();
+    
+    // Simulate streaming
+    setTimeout(() => {
+        const response = getResponseForMentor(mentor, userText, preset);
+        emitter.emit('data', { text: response });
+        emitter.emit('end');
+    }, 500); // Simulate a delay in response generation
 
-    // Build the response based on the preset
-    let responseText = '';
-    switch (preset) {
-        case 'drill':
-            responseText = `${persona}: Drill response based on ${userText}`;
-            break;
-        case 'advise':
-            responseText = `${persona}: Advice on ${userText}`;
-            break;
-        case 'roleplay':
-            responseText = `${persona}: Roleplay response for ${userText}`;
-            break;
-        default:
-            responseText = `${persona}: General chat response for ${userText}`;
-            break;
-    }
-
-    return { responseText };
+    return emitter; // Return the event emitter that streams data
 };
 
-function getPersonaForMentor(mentor) {
-    // Return the persona message based on the mentor
-    const personas = {
-        sun_tzu: 'Strategic and calm',
-        machiavelli: 'Cunning and practical',
-        cleopatra: 'Charismatic and persuasive',
-        // Add more mentors as needed
-    };
-
-    return personas[mentor] || 'General mentor persona';
-} 
+// Example of response generation logic
+function getResponseForMentor(mentor, userText, preset) {
+    // Here, you should handle different mentors and presets
+    // For simplicity, this is just a hardcoded example
+    if (mentor === 'casanova') {
+        return `Casanova says: "You need to charm her with your words, not just chase her."`;
+    }
+    return `Response from ${mentor} for user text: ${userText}`;
+}
