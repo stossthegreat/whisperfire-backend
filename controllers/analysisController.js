@@ -214,8 +214,8 @@ exports.mentorChat = async (req, res) => {
 };
 
 module.exports = {
-    unifiedAnalyze,
-    analyzeScan,
-    analyzePattern,
-    mentorChat
+    unifiedAnalyze: exports.unifiedAnalyze,
+    analyzeScan: exports.analyzeScan,
+    analyzePattern: exports.analyzePattern,
+    mentorChat: exports.mentorChat
 };
