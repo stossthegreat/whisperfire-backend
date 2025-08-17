@@ -1,6 +1,3 @@
-// routes/progress.js
-// Handles progress event (XP, streaks, etc.)
-
 const firebaseAdmin = require('firebase-admin');
 
 // Progress event route
@@ -45,4 +42,4 @@ async function checkIdempotency(idempotencyKey) {
     const ref = firebaseAdmin.firestore().collection('idempotency').doc(idempotencyKey);
     const doc = await ref.get();
     return doc.exists;
-} 
+}
