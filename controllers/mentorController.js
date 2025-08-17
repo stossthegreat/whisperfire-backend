@@ -8,7 +8,6 @@ exports.mentorsChat = (req, res) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    // Start stream
     let streamData = generateMentorResponse(mentor, userText, preset, options);
 
     streamData.on('data', (chunk) => {
@@ -17,11 +16,6 @@ exports.mentorsChat = (req, res) => {
 
     streamData.on('end', () => {
         res.write('data: {"done": true}\n\n');
-        res.end();
-    });
-
-    streamData.on('error', (err) => {
-        res.write('data: {"error": "Internal server error"}\n\n');
         res.end();
     });
 };
