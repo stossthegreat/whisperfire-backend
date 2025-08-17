@@ -1,9 +1,8 @@
-// server.js
-require('dotenv').config(); // Load environment variables from .env file
+require('dotenv').config();  // Load environment variables from .env file
 const express = require('express');
 const bodyParser = require('body-parser');
-const apiRoutes = require('./routes/apiRoutes'); // Routes for different API endpoints
 const cors = require('cors');
+const apiRoutes = require('./routes/apiRoutes'); // Routes for different API endpoints
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -17,4 +16,4 @@ app.use('/api', apiRoutes);
 // Start the server
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
-}); 
+});
