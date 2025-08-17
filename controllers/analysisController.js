@@ -1,11 +1,16 @@
-const { WhisperfireResponse, validateResponse } = require('../utils/responseValidator');
-const firebaseAdmin = require('firebase-admin');
+const { WhisperfireResponse, validateResponse } = require('../utils/responseValidator'); // Add validation logic if needed
 
 // Analyze Scan route
 exports.analyzeScan = async (req, res) => {
     try {
         const { message, tone, relationship, content_type, subject_name } = req.body;
-        const response = await analyzeRequest({ message, tone, relationship, content_type, subject_name });
+
+        // Process the request
+        const response = await analyzeRequest({
+            message, tone, relationship, content_type, subject_name
+        });
+
+        // Send the response
         res.status(200).json(response);
     } catch (error) {
         res.status(500).json({ error: 'Error processing scan request.' });
@@ -16,7 +21,13 @@ exports.analyzeScan = async (req, res) => {
 exports.analyzePattern = async (req, res) => {
     try {
         const { messages, tone, relationship, content_type, subject_name } = req.body;
-        const response = await analyzePatternRequest({ messages, tone, relationship, content_type, subject_name });
+
+        // Process the request
+        const response = await analyzePatternRequest({
+            messages, tone, relationship, content_type, subject_name
+        });
+
+        // Send the response
         res.status(200).json(response);
     } catch (error) {
         res.status(500).json({ error: 'Error processing pattern request.' });
