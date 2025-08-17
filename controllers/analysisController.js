@@ -1,58 +1,38 @@
-// controllers/analysisController.js
+const { WhisperfireResponse, validateResponse } = require('../utils/responseValidator');
+const firebaseAdmin = require('firebase-admin');
 
-const { analyzeWithAI } = require('../services/aiService'); // Your AI service
-const { saveProgress } = require('../services/firebaseService'); // Firebase service for saving user progress
+// Analyze Scan route
+exports.analyzeScan = async (req, res) => {
+    try {
+        const { message, tone, relationship, content_type, subject_name } = req.body;
+        const response = await analyzeRequest({ message, tone, relationship, content_type, subject_name });
+        res.status(200).json(response);
+    } catch (error) {
+        res.status(500).json({ error: 'Error processing scan request.' });
+    }
+};
 
-// Handle scan analysis
-async function analyzeScan(req, res) {
-  try {
-    const { message, tone, userId } = req.body;
+// Analyze Pattern route
+exports.analyzePattern = async (req, res) => {
+    try {
+        const { messages, tone, relationship, content_type, subject_name } = req.body;
+        const response = await analyzePatternRequest({ messages, tone, relationship, content_type, subject_name });
+        res.status(200).json(response);
+    } catch (error) {
+        res.status(500).json({ error: 'Error processing pattern request.' });
+    }
+};
 
-    // Process the scan using AI
-    const scanResult = await analyzeWithAI(message, tone); // Call AI service for scan
-
-    // Save the progress in the database (or Firestore if you had Firebase)
-    await saveProgress(userId, { scanResult });
-
-    res.json({ success: true, data: scanResult });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+// Helper function to process scan
+async function analyzeRequest(data) {
+    const { message, tone, relationship, content_type, subject_name } = data;
+    const result = WhisperfireResponse.generateScanResult(message, tone, relationship);
+    return validateResponse(result);
 }
 
-// Handle pattern analysis
-async function analyzePattern(req, res) {
-  try {
-    const { messages, tone, userId } = req.body;
-
-    // Process the pattern analysis using AI
-    const patternResult = await analyzeWithAI(messages.join('\n'), tone); // Join messages and call AI
-
-    // Save the pattern analysis progress (save it to Firestore or database)
-    await saveProgress(userId, { patternResult });
-
-    res.json({ success: true, data: patternResult });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+// Helper function to process pattern
+async function analyzePatternRequest(data) {
+    const { messages, tone, relationship, content_type, subject_name } = data;
+    const result = WhisperfireResponse.generatePatternResult(messages, tone, relationship);
+    return validateResponse(result);
 }
-
-// Handle mentor chat (similar structure)
-async function mentorChat(req, res) {
-  try {
-    const { mentor, userText, preset, options } = req.body;
-
-    // Call AI service to get mentor response
-    const mentorResponse = await getMentorResponse(mentor, userText, preset, options);
-
-    res.json({ success: true, data: mentorResponse });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-}
-
-module.exports = {
-  analyzeScan,
-  analyzePattern,
-  mentorChat
-}; 
