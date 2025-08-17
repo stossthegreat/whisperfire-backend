@@ -3,11 +3,14 @@ const router = express.Router();
 const analysisController = require('../controllers/analysisController');
 const mentorController = require('../controllers/mentorController');
 
-// Analyze routes
+// UNIFIED ANALYZE ROUTE - This is what your Flutter app calls
+router.post('/analyze', analysisController.unifiedAnalyze);
+
+// SEPARATE ANALYZE ROUTES - Keep for backward compatibility  
 router.post('/analyze/scan', analysisController.analyzeScan);
 router.post('/analyze/pattern', analysisController.analyzePattern);
 
-// Mentor chat route
-router.post('/mentor', mentorController.mentorsChat); // Ensure this matches your route
+// MENTOR ROUTE - This is what your Flutter app calls
+router.post('/mentor', mentorController.mentorsChat);
 
 module.exports = router;
