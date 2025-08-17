@@ -1,6 +1,6 @@
 // controllers/analysisController.js
 
-const { WhisperfireResponse, validateResponse } = require('../utils/responseValidator');
+const { analyzeWithAI, getMentorResponse } = require('../services/aiService');
 
 // UNIFIED ANALYZE ROUTE - Handles both scan and pattern based on 'tab' field
 exports.unifiedAnalyze = async (req, res) => {
@@ -13,9 +13,21 @@ exports.unifiedAnalyze = async (req, res) => {
             // Handle scan analysis
             console.log(`Processing SCAN analysis: "${message}" with tone: ${tone}`);
             
-            const response = await analyzeRequest({
-                message, tone, relationship, content_type, subject_name
-            });
+            const analysisData = await analyzeWithAI(message, tone, 'scan');
+            
+            const response = {
+                success: true,
+                data: {
+                    context: {
+                        tab: 'scan',
+                        relationship: relationship || 'Partner',
+                        tone: tone,
+                        contentType: content_type || 'dm',
+                        subjectName: subject_name
+                    },
+                    ...analysisData
+                }
+            };
             
             return res.status(200).json(response);
             
@@ -23,9 +35,28 @@ exports.unifiedAnalyze = async (req, res) => {
             // Handle pattern analysis
             console.log(`Processing PATTERN analysis with ${messages.length} messages`);
             
-            const response = await analyzePatternRequest({
-                messages, tone, relationship, content_type, subject_name
-            });
+            // Combine messages for analysis
+            const combinedMessage = messages.join('\n---\n');
+            const analysisData = await analyzeWithAI(combinedMessage, tone, 'pattern');
+            
+            const response = {
+                success: true,
+                data: {
+                    context: {
+                        tab: 'pattern',
+                        relationship: relationship || 'Partner',
+                        tone: tone,
+                        contentType: content_type || 'dm',
+                        subjectName: subject_name
+                    },
+                    ...analysisData,
+                    // Add pattern-specific fields
+                    pattern: analysisData.pattern || {
+                        cycle: `Analysis of ${messages.length} messages`,
+                        prognosis: "Pattern analysis complete"
+                    }
+                }
+            };
             
             return res.status(200).json(response);
             
@@ -56,9 +87,24 @@ exports.analyzeScan = async (req, res) => {
             });
         }
         
-        const response = await analyzeRequest({
-            message, tone, relationship, content_type, subject_name
-        });
+        console.log(`Processing separate SCAN analysis: "${message}" with tone: ${tone}`);
+        
+        const analysisData = await analyzeWithAI(message, tone, 'scan');
+        
+        const response = {
+            success: true,
+            data: {
+                context: {
+                    tab: 'scan',
+                    relationship: relationship || 'Partner',
+                    tone: tone,
+                    contentType: content_type || 'dm',
+                    subjectName: subject_name
+                },
+                ...analysisData
+            }
+        };
+        
         res.status(200).json(response);
     } catch (error) {
         console.error('Scan analysis error:', error);
@@ -77,9 +123,29 @@ exports.analyzePattern = async (req, res) => {
             });
         }
         
-        const response = await analyzePatternRequest({
-            messages, tone, relationship, content_type, subject_name
-        });
+        console.log(`Processing separate PATTERN analysis with ${messages.length} messages`);
+        
+        const combinedMessage = messages.join('\n---\n');
+        const analysisData = await analyzeWithAI(combinedMessage, tone, 'pattern');
+        
+        const response = {
+            success: true,
+            data: {
+                context: {
+                    tab: 'pattern',
+                    relationship: relationship || 'Partner',
+                    tone: tone,
+                    contentType: content_type || 'dm',
+                    subjectName: subject_name
+                },
+                ...analysisData,
+                pattern: analysisData.pattern || {
+                    cycle: `Analysis of ${messages.length} messages`,
+                    prognosis: "Pattern analysis complete"
+                }
+            }
+        };
+        
         res.status(200).json(response);
     } catch (error) {
         console.error('Pattern analysis error:', error);
@@ -87,104 +153,69 @@ exports.analyzePattern = async (req, res) => {
     }
 };
 
-// HELPER FUNCTION - Process scan analysis
-async function analyzeRequest(data) {
-    const { message, tone, relationship, content_type, subject_name } = data;
-    
-    // Mock response for now - replace with actual AI analysis
-    const mockResult = {
-        success: true,
-        data: {
-            context: {
-                tab: 'scan',
-                relationship: relationship || 'Partner',
-                tone: tone,
-                contentType: content_type || 'dm',
-                subjectName: subject_name
-            },
-            headline: `Analysis of message with ${tone} tone`,
-            coreTake: `Message analysis: "${message.substring(0, 50)}..."`,
-            tactic: {
-                label: 'Communication Pattern',
-                confidence: 85
-            },
-            motives: 'General communication intent',
-            targeting: 'Audience engagement',
-            powerPlay: 'Standard interaction approach',
-            receipts: [
-                `Message tone: ${tone}`,
-                `Content type: ${content_type || 'dm'}`
-            ],
-            nextMoves: 'Continue conversation naturally',
-            suggestedReply: {
-                style: tone,
-                text: 'Thank you for sharing that with me.'
-            },
-            safety: {
-                riskLevel: 'LOW',
-                notes: 'Standard communication detected'
-            },
-            metrics: {
-                redFlag: 15,
-                certainty: 85,
-                viralPotential: 25
-            },
-            pattern: null,
-            ambiguity: null
+// MENTOR CHAT ROUTE
+exports.mentorChat = async (req, res) => {
+    try {
+        console.log('Mentor chat request received:', req.body);
+        
+        const { mentor, user_text, userText, preset, options, userId } = req.body;
+        
+        // Handle both user_text and userText
+        const actualUserText = user_text || userText;
+        
+        if (!mentor || !actualUserText || !preset) {
+            return res.status(400).json({ 
+                error: 'Missing required fields: mentor, user_text, and preset are required',
+                received: { mentor, user_text: actualUserText, preset }
+            });
         }
-    };
-    
-    return validateResponse(mockResult);
-}
 
-// HELPER FUNCTION - Process pattern analysis  
-async function analyzePatternRequest(data) {
-    const { messages, tone, relationship, content_type, subject_name } = data;
-    
-    // Mock response for now - replace with actual AI analysis
-    const mockResult = {
-        success: true,
-        data: {
-            context: {
-                tab: 'pattern',
-                relationship: relationship || 'Partner',
-                tone: tone,
-                contentType: content_type || 'dm',
-                subjectName: subject_name
-            },
-            headline: `Pattern analysis of ${messages.length} messages`,
-            coreTake: `Communication pattern analysis across ${messages.length} messages`,
-            tactic: {
-                label: 'Communication Pattern',
-                confidence: 90
-            },
-            motives: 'Ongoing communication pattern',
-            targeting: 'Relationship dynamics',
-            powerPlay: 'Communication style consistency',
-            receipts: messages.slice(0, 4).map((msg, i) => 
-                `Message ${i + 1}: ${msg.substring(0, 30)}...`
-            ),
-            nextMoves: 'Monitor communication trends',
-            suggestedReply: {
-                style: tone,
-                text: 'I appreciate our ongoing conversation.'
-            },
-            safety: {
-                riskLevel: 'LOW',
-                notes: 'Pattern analysis complete'
-            },
-            metrics: {
-                redFlag: 20,
-                certainty: 90,
-                viralPotential: 30
-            },
-            pattern: {
-                cycle: 'Regular communication',
-                prognosis: 'Healthy interaction pattern'
-            },
-            ambiguity: null
+        console.log(`Processing mentor chat: ${mentor} - ${preset} - "${actualUserText}"`);
+        
+        // Check if streaming is requested
+        if (options?.stream) {
+            // Handle streaming response (SSE)
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            
+            try {
+                const mentorResponse = await getMentorResponse(mentor, actualUserText, preset, options);
+                
+                // Send the response as streaming
+                res.write(`data: ${JSON.stringify({ text: mentorResponse.response })}\n\n`);
+                res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+                res.end();
+                
+            } catch (error) {
+                console.error('Streaming mentor error:', error);
+                res.write(`data: ${JSON.stringify({ error: 'Failed to generate response' })}\n\n`);
+                res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+                res.end();
+            }
+        } else {
+            // Handle regular JSON response
+            const mentorResponse = await getMentorResponse(mentor, actualUserText, preset, options);
+            
+            res.json({ 
+                success: true, 
+                data: mentorResponse,
+                message: 'Mentor response generated successfully'
+            });
         }
-    };
-    
-    return validateResponse(mockResult);
-}
+        
+    } catch (error) {
+        console.error('Mentor chat error:', error);
+        res.status(500).json({ 
+            error: 'Failed to generate mentor response',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+module.exports = {
+    unifiedAnalyze,
+    analyzeScan,
+    analyzePattern,
+    mentorChat
+};
