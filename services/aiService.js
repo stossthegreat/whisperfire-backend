@@ -1,14 +1,14 @@
 // services/aiService.js
-
 const axios = require('axios');
 
-// Together AI API endpoint
-const TOGETHER_API_URL = 'https://api.together.xyz/v1/chat/completions';
+// DeepSeek V3 API endpoint
+const DEEPSEEK_API_URL = 'https://api.together.xyz/v1/chat/completions';
 
-// Function to analyze messages with Together AI
+// Function to analyze messages with DeepSeek V3
 async function analyzeWithAI(message, tone, tab = 'scan') {
   try {
-    console.log(`Calling Together AI for ${tab} analysis with tone: ${tone}`);
+    console.log(`Calling DeepSeek V3 for ${tab} analysis with tone: ${tone}`);
+    console.log('API Key:', process.env.TOGETHER_AI_KEY ? 'SET' : 'NOT SET');
     
     const systemPrompt = `You are an expert communication analyst specializing in detecting manipulation patterns and psychological tactics. 
     
@@ -44,8 +44,8 @@ Analyze the given message(s) and provide a detailed assessment in this EXACT JSO
 Tone context: ${tone} (savage = direct/harsh, soft = gentle, clinical = analytical)
 Return ONLY the JSON object, no other text.`;
 
-    const response = await axios.post(TOGETHER_API_URL, {
-      model: "meta-llama/Llama-2-70b-chat-hf",
+    const requestBody = {
+      model: "deepseek-ai/DeepSeek-V3", // Correct DeepSeek V3 model name
       messages: [
         {
           role: "system",
@@ -58,7 +58,11 @@ Return ONLY the JSON object, no other text.`;
       ],
       max_tokens: 1000,
       temperature: 0.7
-    }, {
+    };
+
+    console.log('Request body:', JSON.stringify(requestBody, null, 2));
+
+    const response = await axios.post(DEEPSEEK_API_URL, requestBody, {
       headers: {
         'Authorization': `Bearer ${process.env.TOGETHER_AI_KEY}`,
         'Content-Type': 'application/json'
@@ -89,12 +93,16 @@ Return ONLY the JSON object, no other text.`;
     
   } catch (error) {
     console.error('AI Analysis Error:', error.message);
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', error.response.data);
+    }
     // Return fallback response instead of failing
     return getFallbackAnalysis(message, tone);
   }
 }
 
-// Function to get mentor responses with Together AI
+// Function to get mentor responses with DeepSeek V3
 async function getMentorResponse(mentor, userText, preset, options = {}) {
   try {
     console.log(`Generating response for ${mentor} with preset ${preset}`);
@@ -124,8 +132,8 @@ ${presetInstruction}
 
 Keep responses focused, practical, and under 200 words. Speak in your authentic voice and personality.`;
 
-    const response = await axios.post(TOGETHER_API_URL, {
-      model: "meta-llama/Llama-2-70b-chat-hf",
+    const response = await axios.post(DEEPSEEK_API_URL, {
+      model: "deepseek-ai/DeepSeek-V3", // Correct DeepSeek V3 model name
       messages: [
         {
           role: "system",
