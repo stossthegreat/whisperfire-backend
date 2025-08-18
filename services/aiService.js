@@ -491,11 +491,11 @@ function getViralFallbackAnalysis(message, tone, tab) {
       consistencyScore: 85
     } : null,
     hiddenAgenda: tab === 'pattern' ? `Pattern analysis reveals systematic agenda for relationship control and emotional manipulation` : null,
-    archetypes: tab === 'pattern' ? {
-      primary: "Pattern Establisher",
-      secondary: "Behavioral Conditioner",
-      tertiary: "Emotional Programmer"
-    } : null,
+    archetypes: tab === 'pattern' ? [
+      "Pattern Establisher",
+      "Behavioral Conditioner", 
+      "Emotional Programmer"
+    ] : null,
     triggerPatternMap: tab === 'pattern' ? {
       emotionalTriggers: ["validation cycles", "control mechanisms", "attention patterns"],
       responsePatterns: ["escalation sequences", "de-escalation attempts", "manipulation cycles"],
