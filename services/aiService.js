@@ -219,3 +219,12 @@ module.exports = {
   analyzeWithAI,
   getMentorResponse
 };
+} catch (error) {
+    console.error('AI Analysis Error:', error.message);
+    if (error.response) {
+        console.error('Together AI Error Details:', error.response.data);
+        console.error('Status:', error.response.status);
+    }
+    // Return fallback response instead of failing
+    return getFallbackAnalysis(message, tone);
+}
