@@ -146,15 +146,15 @@ exports.unifiedAnalyze = async (req, res) => {
                         future_patterns: "expect continuation of established behavioral trends"
                     },
                     ambiguity: null,
-                    // PATTERN-SPECIFIC ENHANCED FIELDS
-                    hidden_agenda: analysisData.hiddenAgenda || analysisData.hidden_agenda || null,
-                    archetypes: analysisData.archetypes || null,
-                    trigger_pattern_map: analysisData.triggerPatternMap || analysisData.trigger_pattern_map || null,
-                    contradictions: analysisData.contradictions || null,
-                    weapons: analysisData.weapons || null,
-                    forecast: analysisData.forecast || null,
-                    counter_intervention: analysisData.counterIntervention || analysisData.counter_intervention || null,
-                    long_game: analysisData.longGame || analysisData.long_game || null
+                    // PATTERN-SPECIFIC ENHANCED FIELDS (matching original structure)
+                    hidden_agenda: analysisData.hiddenAgenda || analysisData.hidden_agenda,
+                    archetypes: analysisData.archetypes,
+                    trigger_pattern_map: analysisData.triggerPatternMap || analysisData.trigger_pattern_map,
+                    contradictions: analysisData.contradictions,
+                    weapons: analysisData.weapons,
+                    forecast: analysisData.forecast,
+                    counter_intervention: analysisData.counterIntervention || analysisData.counter_intervention,
+                    long_game: analysisData.longGame || analysisData.long_game
                 }
             };
             
@@ -352,15 +352,15 @@ exports.analyzePattern = async (req, res) => {
                     future_patterns: "expect intensification of established patterns when disrupted"
                 },
                 ambiguity: null,
-                // ENHANCED PATTERN-SPECIFIC FIELDS
-                hidden_agenda: analysisData.hiddenAgenda || analysisData.hidden_agenda || null,
-                archetypes: analysisData.archetypes || null,
-                trigger_pattern_map: analysisData.triggerPatternMap || analysisData.trigger_pattern_map || null,
-                contradictions: analysisData.contradictions || null,
-                weapons: analysisData.weapons || null,
-                forecast: analysisData.forecast || null,
-                counter_intervention: analysisData.counterIntervention || analysisData.counter_intervention || null,
-                long_game: analysisData.longGame || analysisData.long_game || null
+                // ENHANCED PATTERN-SPECIFIC FIELDS (matching original structure)
+                hidden_agenda: analysisData.hiddenAgenda || analysisData.hidden_agenda,
+                archetypes: analysisData.archetypes,
+                trigger_pattern_map: analysisData.triggerPatternMap || analysisData.trigger_pattern_map,
+                contradictions: analysisData.contradictions,
+                weapons: analysisData.weapons,
+                forecast: analysisData.forecast,
+                counter_intervention: analysisData.counterIntervention || analysisData.counter_intervention,
+                long_game: analysisData.longGame || analysisData.long_game
             }
         };
         
