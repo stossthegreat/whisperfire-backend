@@ -147,18 +147,14 @@ exports.unifiedAnalyze = async (req, res) => {
                     },
                     ambiguity: null,
                     // PATTERN-SPECIFIC ENHANCED FIELDS
-                    hidden_agenda: analysisData.hiddenAgenda || analysisData.hidden_agenda || "Long-term pattern suggests underlying agenda detection required",
-                    archetypes: analysisData.archetypes || ["Communicator", "Pattern Establisher"],
-                    trigger_pattern_map: analysisData.triggerPatternMap || analysisData.trigger_pattern_map || {
-                        emotional_triggers: ["validation seeking", "control attempts"],
-                        response_patterns: ["consistent messaging", "escalation potential"],
-                        manipulation_cycles: ["setup", "execution", "reinforcement"]
-                    },
-                    contradictions: analysisData.contradictions || ["Analyzing for internal contradictions in messaging patterns"],
-                    weapons: analysisData.weapons || ["Emotional appeals", "Consistency pressure", "Pattern expectations"],
-                    forecast: analysisData.forecast || `Based on ${messages.length}-message analysis: expect continued pattern with ${tone} tone escalation potential`,
-                    counter_intervention: analysisData.counterIntervention || analysisData.counter_intervention || "Pattern disruption through unexpected responses and boundary enforcement",
-                    long_game: analysisData.longGame || analysisData.long_game || "Long-term strategy appears focused on establishing predictable communication dynamic"
+                    hidden_agenda: analysisData.hiddenAgenda || analysisData.hidden_agenda || null,
+                    archetypes: analysisData.archetypes || null,
+                    trigger_pattern_map: analysisData.triggerPatternMap || analysisData.trigger_pattern_map || null,
+                    contradictions: analysisData.contradictions || null,
+                    weapons: analysisData.weapons || null,
+                    forecast: analysisData.forecast || null,
+                    counter_intervention: analysisData.counterIntervention || analysisData.counter_intervention || null,
+                    long_game: analysisData.longGame || analysisData.long_game || null
                 }
             };
             
@@ -357,27 +353,14 @@ exports.analyzePattern = async (req, res) => {
                 },
                 ambiguity: null,
                 // ENHANCED PATTERN-SPECIFIC FIELDS
-                hidden_agenda: analysisData.hiddenAgenda || analysisData.hidden_agenda || `${messages.length}-message pattern reveals systematic agenda for relationship control and emotional manipulation`,
-                archetypes: analysisData.archetypes || ["Pattern Establisher", "Behavioral Conditioner", "Emotional Programmer"],
-                trigger_pattern_map: analysisData.triggerPatternMap || analysisData.trigger_pattern_map || {
-                    emotional_triggers: ["validation cycles", "control mechanisms", "attention patterns"],
-                    response_patterns: ["escalation sequences", "de-escalation attempts", "manipulation cycles"],
-                    manipulation_cycles: ["setup phase", "execution phase", "reinforcement phase", "reset phase"]
-                },
-                contradictions: analysisData.contradictions || [
-                    "Internal contradictions in messaging reveal unconscious conflicts",
-                    "Pattern inconsistencies indicate psychological instability",
-                    "Behavioral contradictions suggest manipulative intent vs. genuine communication"
-                ],
-                weapons: analysisData.weapons || [
-                    "Emotional conditioning through repetitive patterns",
-                    "Expectation manipulation through consistency",
-                    "Psychological programming through behavioral rewards",
-                    "Attachment exploitation through pattern reinforcement"
-                ],
-                forecast: analysisData.forecast || `PREDICTION: Based on ${messages.length}-message deep analysis - expect pattern intensification with ${tone === 'savage' ? 'aggressive escalation' : tone === 'soft' ? 'emotional manipulation increase' : 'strategic pattern evolution'} within next 3-5 interactions`,
-                counter_intervention: analysisData.counterIntervention || analysisData.counter_intervention || "STRATEGY: Systematic pattern disruption through unexpected responses, boundary enforcement, and psychological counter-programming to break established manipulation cycles",
-                long_game: analysisData.longGame || analysisData.long_game || "LONG-TERM ANALYSIS: Pattern suggests systematic psychological conditioning aimed at establishing dominant position in relationship dynamic through behavioral control and emotional dependency creation"
+                hidden_agenda: analysisData.hiddenAgenda || analysisData.hidden_agenda || null,
+                archetypes: analysisData.archetypes || null,
+                trigger_pattern_map: analysisData.triggerPatternMap || analysisData.trigger_pattern_map || null,
+                contradictions: analysisData.contradictions || null,
+                weapons: analysisData.weapons || null,
+                forecast: analysisData.forecast || null,
+                counter_intervention: analysisData.counterIntervention || analysisData.counter_intervention || null,
+                long_game: analysisData.longGame || analysisData.long_game || null
             }
         };
         
