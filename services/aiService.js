@@ -483,35 +483,32 @@ function getViralFallbackAnalysis(message, tone, tab) {
       counterStrategy: `Maintain ${tone} boundaries while addressing the underlying emotional need without feeding the escalation pattern`,
       futurePatterns: `Expect ${urgencyLevel === 'HIGH' ? 'continued intensity or emotional regulation attempts' : 'standard communication progression'}`
     },
-    // Fix the problematic fields for frontend compatibility
+    // Pattern-specific fields - only for pattern analysis, matching original structure
+    ...(tab === 'pattern' && {
+      hiddenAgenda: `Pattern analysis reveals systematic agenda for relationship control and emotional manipulation`,
+      archetypes: ["Pattern Establisher", "Behavioral Conditioner", "Emotional Programmer"],
+      triggerPatternMap: {
+        emotional_triggers: ["validation cycles", "control mechanisms", "attention patterns"],
+        response_patterns: ["escalation sequences", "de-escalation attempts", "manipulation cycles"],
+        manipulation_cycles: ["setup phase", "execution phase", "reinforcement phase", "reset phase"]
+      },
+      contradictions: [
+        "Internal contradictions in messaging reveal unconscious conflicts",
+        "Pattern inconsistencies indicate psychological instability"
+      ],
+      weapons: [
+        "Emotional conditioning through repetitive patterns",
+        "Expectation manipulation through consistency"
+      ],
+      forecast: `PREDICTION: Based on message analysis - expect pattern intensification with ${tone === 'savage' ? 'aggressive escalation' : tone === 'soft' ? 'emotional manipulation increase' : 'strategic pattern evolution'} within next 3-5 interactions`,
+      counterIntervention: "STRATEGY: Systematic pattern disruption through unexpected responses and boundary enforcement",
+      longGame: "LONG-TERM ANALYSIS: Pattern suggests systematic psychological conditioning for relationship control"
+    }),
+    // Always include pattern field structure
     pattern: tab === 'pattern' ? {
       cycle: `Advanced behavioral cycle mapped across message analysis`,
-      prognosis: "Pattern analysis reveals psychological programming",
-      escalationDetected: urgencyLevel === 'HIGH',
-      consistencyScore: 85
-    } : null,
-    hiddenAgenda: tab === 'pattern' ? `Pattern analysis reveals systematic agenda for relationship control and emotional manipulation` : null,
-    archetypes: tab === 'pattern' ? [
-      "Pattern Establisher",
-      "Behavioral Conditioner", 
-      "Emotional Programmer"
-    ] : null,
-    triggerPatternMap: tab === 'pattern' ? {
-      emotionalTriggers: ["validation cycles", "control mechanisms", "attention patterns"],
-      responsePatterns: ["escalation sequences", "de-escalation attempts", "manipulation cycles"],
-      manipulationCycles: ["setup phase", "execution phase", "reinforcement phase", "reset phase"]
-    } : null,
-    contradictions: tab === 'pattern' ? [
-      "Internal contradictions in messaging reveal unconscious conflicts",
-      "Pattern inconsistencies indicate psychological instability"
-    ] : null,
-    weapons: tab === 'pattern' ? [
-      "Emotional conditioning through repetitive patterns",
-      "Expectation manipulation through consistency"
-    ] : null,
-    forecast: tab === 'pattern' ? `PREDICTION: Based on message analysis - expect pattern intensification with ${tone === 'savage' ? 'aggressive escalation' : tone === 'soft' ? 'emotional manipulation increase' : 'strategic pattern evolution'} within next 3-5 interactions` : null,
-    counterIntervention: tab === 'pattern' ? "STRATEGY: Systematic pattern disruption through unexpected responses and boundary enforcement" : null,
-    longGame: tab === 'pattern' ? "LONG-TERM ANALYSIS: Pattern suggests systematic psychological conditioning for relationship control" : null
+      prognosis: "Pattern analysis reveals psychological programming"
+    } : null
   };
 }
 
