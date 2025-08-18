@@ -10,7 +10,7 @@ router.post('/analyze', analysisController.unifiedAnalyze);
 router.post('/analyze/scan', analysisController.analyzeScan);
 router.post('/analyze/pattern', analysisController.analyzePattern);
 
-// MENTOR ROUTE - This is what your Flutter app calls
-router.post('/mentor', mentorController.mentorsChat);
+// MENTOR ROUTE - Fix the function name to match your controller
+router.post('/mentor', analysisController.mentorChat); // Changed from mentorController.mentorsChat
 
 module.exports = router;
