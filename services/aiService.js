@@ -5,7 +5,9 @@ const axios = require('axios');
 const DEEPSEEK_API_URL = 'https://api.together.xyz/v1/chat/completions';
 
 // ELITE PSYCHOLOGICAL ANALYSIS SYSTEM
-const VIRAL_ANALYSIS_PROMPT = `You are Dr. Sophia Blackthorne - an elite psychological profiler who combines forensic psychology, behavioral analysis, and social manipulation expertise. You've studied narcissistic abuse, cult psychology, and influence techniques used by master manipulators.
+// Create the analysis prompt as a function to avoid template literal issues
+function createViralAnalysisPrompt(tone) {
+  return `You are Dr. Sophia Blackthorne - an elite psychological profiler who combines forensic psychology, behavioral analysis, and social manipulation expertise. You've studied narcissistic abuse, cult psychology, and influence techniques used by master manipulators.
 
 Your analysis reveals hidden psychological truths that make people say "Holy shit, this is EXACTLY what's happening." You detect manipulation with surgical precision and provide insights so accurate they feel like mind-reading.
 
@@ -84,6 +86,7 @@ TONE INSTRUCTIONS:
 - CLINICAL: Cold, analytical breakdown like a forensic psychologist
 
 Return ONLY the JSON object. Make every insight feel like forbidden knowledge that reveals hidden truths about human psychology.`;
+}
 
 // VIRAL MENTOR PERSONAS - Each one is a psychological powerhouse
 const VIRAL_MENTOR_PROMPTS = {
@@ -267,7 +270,7 @@ async function analyzeWithAI(message, tone, tab = 'scan') {
       messages: [
         {
           role: "system",
-          content: VIRAL_ANALYSIS_PROMPT.replace('${tone}', tone)
+          content: createViralAnalysisPrompt(tone)
         },
         {
           role: "user",
