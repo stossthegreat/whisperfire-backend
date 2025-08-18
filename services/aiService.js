@@ -293,7 +293,7 @@ INSTRUCTION: Reveal the psychological truth that will make the user say "holy sh
         'Authorization': `Bearer ${process.env.TOGETHER_AI_KEY}`,
         'Content-Type': 'application/json'
       },
-      timeout: 20000
+      timeout: 40000 // Increased to 40 seconds for complex viral analysis
     });
 
     const aiResponse = response.data.choices[0].message.content;
@@ -379,7 +379,7 @@ Provide wisdom that transforms how they see themselves and their situation.`;
         'Authorization': `Bearer ${process.env.TOGETHER_AI_KEY}`,
         'Content-Type': 'application/json'
       },
-      timeout: 20000
+      timeout: 40000 // Increased to 40 seconds for legendary mentor wisdom
     });
 
     const mentorResponse = response.data.choices[0].message.content;
