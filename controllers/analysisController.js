@@ -22,10 +22,29 @@ exports.unifiedAnalyze = async (req, res) => {
                         tab: 'scan',
                         relationship: relationship || 'Partner',
                         tone: tone,
-                        contentType: content_type || 'dm',
-                        subjectName: subject_name
+                        content_type: content_type || 'dm',
+                        subject_name: subject_name
                     },
-                    ...analysisData
+                    headline: analysisData.headline,
+                    core_take: analysisData.coreTake || analysisData.core_take,
+                    tactic: analysisData.tactic,
+                    motives: analysisData.motives,
+                    targeting: analysisData.targeting,
+                    power_play: analysisData.powerPlay || analysisData.power_play,
+                    receipts: analysisData.receipts,
+                    next_moves: analysisData.nextMoves || analysisData.next_moves,
+                    suggested_reply: analysisData.suggestedReply || analysisData.suggested_reply,
+                    safety: {
+                        risk_level: analysisData.safety?.riskLevel || analysisData.safety?.risk_level || 'LOW',
+                        notes: analysisData.safety?.notes || 'Standard communication detected'
+                    },
+                    metrics: {
+                        red_flag: analysisData.metrics?.redFlag || analysisData.metrics?.red_flag || 15,
+                        certainty: analysisData.metrics?.certainty || 70,
+                        viral_potential: analysisData.metrics?.viralPotential || analysisData.metrics?.viral_potential || 25
+                    },
+                    pattern: null,
+                    ambiguity: null
                 }
             };
             
@@ -46,15 +65,41 @@ exports.unifiedAnalyze = async (req, res) => {
                         tab: 'pattern',
                         relationship: relationship || 'Partner',
                         tone: tone,
-                        contentType: content_type || 'dm',
-                        subjectName: subject_name
+                        content_type: content_type || 'dm',
+                        subject_name: subject_name
                     },
-                    ...analysisData,
-                    // Add pattern-specific fields
+                    headline: analysisData.headline,
+                    core_take: analysisData.coreTake || analysisData.core_take,
+                    tactic: analysisData.tactic,
+                    motives: analysisData.motives,
+                    targeting: analysisData.targeting,
+                    power_play: analysisData.powerPlay || analysisData.power_play,
+                    receipts: analysisData.receipts,
+                    next_moves: analysisData.nextMoves || analysisData.next_moves,
+                    suggested_reply: analysisData.suggestedReply || analysisData.suggested_reply,
+                    safety: {
+                        risk_level: analysisData.safety?.riskLevel || analysisData.safety?.risk_level || 'LOW',
+                        notes: analysisData.safety?.notes || 'Pattern analysis complete'
+                    },
+                    metrics: {
+                        red_flag: analysisData.metrics?.redFlag || analysisData.metrics?.red_flag || 20,
+                        certainty: analysisData.metrics?.certainty || 80,
+                        viral_potential: analysisData.metrics?.viralPotential || analysisData.metrics?.viral_potential || 30
+                    },
                     pattern: analysisData.pattern || {
                         cycle: `Analysis of ${messages.length} messages`,
                         prognosis: "Pattern analysis complete"
-                    }
+                    },
+                    ambiguity: null,
+                    // Pattern-specific fields
+                    hidden_agenda: analysisData.hiddenAgenda || analysisData.hidden_agenda,
+                    archetypes: analysisData.archetypes,
+                    trigger_pattern_map: analysisData.triggerPatternMap || analysisData.trigger_pattern_map,
+                    contradictions: analysisData.contradictions,
+                    weapons: analysisData.weapons,
+                    forecast: analysisData.forecast,
+                    counter_intervention: analysisData.counterIntervention || analysisData.counter_intervention,
+                    long_game: analysisData.longGame || analysisData.long_game
                 }
             };
             
@@ -98,10 +143,29 @@ exports.analyzeScan = async (req, res) => {
                     tab: 'scan',
                     relationship: relationship || 'Partner',
                     tone: tone,
-                    contentType: content_type || 'dm',
-                    subjectName: subject_name
+                    content_type: content_type || 'dm',
+                    subject_name: subject_name
                 },
-                ...analysisData
+                headline: analysisData.headline,
+                core_take: analysisData.coreTake || analysisData.core_take,
+                tactic: analysisData.tactic,
+                motives: analysisData.motives,
+                targeting: analysisData.targeting,
+                power_play: analysisData.powerPlay || analysisData.power_play,
+                receipts: analysisData.receipts,
+                next_moves: analysisData.nextMoves || analysisData.next_moves,
+                suggested_reply: analysisData.suggestedReply || analysisData.suggested_reply,
+                safety: {
+                    risk_level: analysisData.safety?.riskLevel || analysisData.safety?.risk_level || 'LOW',
+                    notes: analysisData.safety?.notes || 'Standard communication detected'
+                },
+                metrics: {
+                    red_flag: analysisData.metrics?.redFlag || analysisData.metrics?.red_flag || 15,
+                    certainty: analysisData.metrics?.certainty || 70,
+                    viral_potential: analysisData.metrics?.viralPotential || analysisData.metrics?.viral_potential || 25
+                },
+                pattern: null,
+                ambiguity: null
             }
         };
         
@@ -135,14 +199,40 @@ exports.analyzePattern = async (req, res) => {
                     tab: 'pattern',
                     relationship: relationship || 'Partner',
                     tone: tone,
-                    contentType: content_type || 'dm',
-                    subjectName: subject_name
+                    content_type: content_type || 'dm',
+                    subject_name: subject_name
                 },
-                ...analysisData,
+                headline: analysisData.headline,
+                core_take: analysisData.coreTake || analysisData.core_take,
+                tactic: analysisData.tactic,
+                motives: analysisData.motives,
+                targeting: analysisData.targeting,
+                power_play: analysisData.powerPlay || analysisData.power_play,
+                receipts: analysisData.receipts,
+                next_moves: analysisData.nextMoves || analysisData.next_moves,
+                suggested_reply: analysisData.suggestedReply || analysisData.suggested_reply,
+                safety: {
+                    risk_level: analysisData.safety?.riskLevel || analysisData.safety?.risk_level || 'LOW',
+                    notes: analysisData.safety?.notes || 'Pattern analysis complete'
+                },
+                metrics: {
+                    red_flag: analysisData.metrics?.redFlag || analysisData.metrics?.red_flag || 20,
+                    certainty: analysisData.metrics?.certainty || 80,
+                    viral_potential: analysisData.metrics?.viralPotential || analysisData.metrics?.viral_potential || 30
+                },
                 pattern: analysisData.pattern || {
                     cycle: `Analysis of ${messages.length} messages`,
                     prognosis: "Pattern analysis complete"
-                }
+                },
+                ambiguity: null,
+                hidden_agenda: analysisData.hiddenAgenda || analysisData.hidden_agenda,
+                archetypes: analysisData.archetypes,
+                trigger_pattern_map: analysisData.triggerPatternMap || analysisData.trigger_pattern_map,
+                contradictions: analysisData.contradictions,
+                weapons: analysisData.weapons,
+                forecast: analysisData.forecast,
+                counter_intervention: analysisData.counterIntervention || analysisData.counter_intervention,
+                long_game: analysisData.longGame || analysisData.long_game
             }
         };
         
