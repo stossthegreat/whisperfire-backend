@@ -1,53 +1,41 @@
-// routes/analyze.js
-// Handles analyze scan and pattern routes
-
-const { WhisperfireResponse, validateResponse } = require('../utils/responseValidator');
-const firebaseAdmin = require('firebase-admin');
+ const { WhisperfireResponse, validateResponse } = require('../utils/responseValidator');
 
 // Analyze Scan route
 exports.analyzeScan = async (req, res) => {
-    try {
-        const { message, tone, relationship, content_type, subject_name } = req.body;
+  try {
+    const { message, tone, relationship, content_type, subject_name } = req.body;
 
-        // Process the request
-        const response = await analyzeRequest({
-            message, tone, relationship, content_type, subject_name
-        });
+    // Log incoming request data
+    console.log('Analyze Scan request received:', req.body);
 
-        // Send the response
-        res.status(200).json(response);
-    } catch (error) {
-        res.status(500).json({ error: 'Error processing scan request.' });
+    // Check if required parameters are provided
+    if (!message || !tone || !relationship || !content_type) {
+      return res.status(400).json({ error: 'Missing required parameters: message, tone, relationship, or content_type' });
     }
-};
 
-// Analyze Pattern route
-exports.analyzePattern = async (req, res) => {
-    try {
-        const { messages, tone, relationship, content_type, subject_name } = req.body;
+    // Process the request
+    const response = await analyzeRequest({
+      message, tone, relationship, content_type, subject_name
+    });
 
-        // Process the request
-        const response = await analyzePatternRequest({
-            messages, tone, relationship, content_type, subject_name
-        });
-
-        // Send the response
-        res.status(200).json(response);
-    } catch (error) {
-        res.status(500).json({ error: 'Error processing pattern request.' });
-    }
+    // Send the response
+    res.status(200).json(response);
+  } catch (error) {
+    console.error('Error in analyzeScan:', error);  // Log the error
+    res.status(500).json({ error: 'Error processing scan request.' });
+  }
 };
 
 // Helper function to process scan
 async function analyzeRequest(data) {
-    const { message, tone, relationship, content_type, subject_name } = data;
-    const result = WhisperfireResponse.generateScanResult(message, tone, relationship);
-    return validateResponse(result);
-}
+  const { message, tone, relationship, content_type, subject_name } = data;
 
-// Helper function to process pattern
-async function analyzePatternRequest(data) {
-    const { messages, tone, relationship, content_type, subject_name } = data;
-    const result = WhisperfireResponse.generatePatternResult(messages, tone, relationship);
-    return validateResponse(result);
-} 
+  // Ensure WhisperfireResponse is correctly generating results
+  console.log('Processing analyzeRequest:', data);  // Log the data
+
+  // Process the request (Mocking response generation here for simplicity)
+  const result = WhisperfireResponse.generateScanResult(message, tone, relationship);
+
+  // Validate response
+  return validateResponse(result);
+}
