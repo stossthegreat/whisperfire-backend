@@ -1,100 +1,74 @@
 // controllers/mentorController.js
-// Clean SSE mentor chat with UTF-8 sanitization and robust error handling
 
 const { generateMentorResponse } = require('../utils/mentorResponse');
 
-// tiny sanitizer to kill smart quotes / NBSP / stray bytes (Â, �)
-function cleanText(s) {
-  return String(s || '')
-    .replace(/\u00A0/g, ' ')
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/\uFFFD/g, '') // replacement char
-    .replace(/Â/g, '')      // common stray byte
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
-
+// Mentor chat route with SSE (Server-Sent Events) streaming
 exports.mentorsChat = (req, res) => {
   try {
+    // Accept both Flutter (user_text) and web (userText)
     const { mentor, user_text, userText, preset, options } = req.body || {};
     const actualUserText = user_text || userText;
-    const mode = preset || 'chat';
 
-    // Basic validation
-    if (!mentor || !actualUserText || !mode) {
+    console.log('Mentor chat request received:', {
+      mentor,
+      preset,
+      hasText: !!actualUserText
+    });
+
+    if (!mentor || !actualUserText || !preset) {
       return res.status(400).json({
-        error: 'Missing required fields: mentor, user_text (or userText), and preset',
-        received: { mentor, user_text: actualUserText, preset: mode }
+        error:
+          'Missing required fields: mentor, user_text (or userText), and preset are required',
+        received: { mentor, user_text: actualUserText, preset }
       });
     }
 
-    console.log(`👂 Mentor chat: mentor=${mentor}, preset=${mode}, text="${actualUserText?.slice(0, 120)}${actualUserText?.length > 120 ? '…' : ''}"`);
-
-    // SSE headers
-    res.status(200);
+    // SSE headers (UTF-8 & proxy-safe)
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no'); // nginx: disable buffering
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', 'Cache-Control, Content-Type');
+    res.setHeader('X-Accel-Buffering', 'no'); // for Nginx
+    res.flushHeaders?.();
 
-    // Keep-alive heartbeat (prevents proxies from closing)
+    // Keep-alive heartbeat (prevents timeouts behind proxies)
     const heartbeat = setInterval(() => {
-      try { res.write(`: ping\n\n`); } catch (_) {}
+      try {
+        res.write(': ping\n\n');
+      } catch {}
     }, 15000);
 
-    const endStream = () => {
+    // Stream AI wisdom
+    const stream = generateMentorResponse(mentor, actualUserText, preset, options);
+
+    stream.on('data', (chunk) => {
+      // normalize small payload shape for client
+      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    });
+
+    stream.on('end', () => {
+      res.write('data: {"done": true}\n\n');
       clearInterval(heartbeat);
-      try {
-        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-        res.end();
-      } catch (_) {}
-    };
-
-    // Start generator (EventEmitter) from utils
-    const emitter = generateMentorResponse(mentor, actualUserText, mode, options);
-
-    emitter.on('data', (chunk) => {
-      try {
-        const payload = {
-          ...chunk,
-          text: cleanText(chunk?.text),
-        };
-        res.write(`data: ${JSON.stringify(payload)}\n\n`);
-      } catch (e) {
-        console.error('SSE write error:', e);
-      }
+      res.end();
     });
 
-    emitter.on('end', () => {
-      endStream();
-    });
-
-    emitter.on('error', (err) => {
+    stream.on('error', (err) => {
       console.error('SSE stream error:', err);
       try {
         res.write(`data: ${JSON.stringify({ error: 'Failed to generate response' })}\n\n`);
-      } catch (_) {}
-      endStream();
-    });
-
-    // If client disconnects
-    req.on('close', () => {
-      console.log('🔌 Client closed SSE connection');
+        res.write('data: {"done": true}\n\n');
+      } catch {}
       clearInterval(heartbeat);
+      res.end();
     });
-
   } catch (error) {
-    console.error('Mentor chat fatal error:', error);
+    console.error('Mentor chat error:', error);
     if (!res.headersSent) {
       return res.status(500).json({ error: 'Failed to generate mentor response' });
     }
     try {
       res.write(`data: ${JSON.stringify({ error: 'Failed to generate response' })}\n\n`);
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-      res.end();
-    } catch (_) {}
+      res.write('data: {"done": true}\n\n');
+    } catch {}
+    res.end();
   }
 };
