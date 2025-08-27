@@ -2,17 +2,20 @@
 const express = require('express');
 const router = express.Router();
 
-const analysisController = require('../controllers/analysisController'); // keep if you have it
+const analysisController = require('../controllers/analysisController');
 const mentorController = require('../controllers/mentorController');
 
-// UNIFIED ANALYZE ROUTE (keep as-is if used)
-router.post('/analyze', analysisController?.unifiedAnalyze || ((req, res) => res.status(501).json({ error: 'unifiedAnalyze not implemented' })));
+/**
+ * UNIFIED ANALYZE ROUTE – primary entry the app should call
+ * (keep your existing analysisController implementation)
+ */
+router.post('/analyze', analysisController.unifiedAnalyze);
 
-// LEGACY ANALYZE ROUTES
-router.post('/analyze/scan', analysisController?.analyzeScan || ((req, res) => res.status(501).json({ error: 'analyzeScan not implemented' })));
-router.post('/analyze/pattern', analysisController?.analyzePattern || ((req, res) => res.status(501).json({ error: 'analyzePattern not implemented' })));
+// Back-compat separate routes (if the app still hits these)
+router.post('/analyze/scan', analysisController.analyzeScan);
+router.post('/analyze/pattern', analysisController.analyzePattern);
 
-// ✅ MENTOR ROUTE — use the mentor controller (your previous file incorrectly pointed to analysisController)
+// Mentor SSE route (FIXED: call mentorController.mentorsChat)
 router.post('/mentor', mentorController.mentorsChat);
 
 module.exports = router;
