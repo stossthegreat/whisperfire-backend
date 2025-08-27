@@ -1,114 +1,100 @@
 // controllers/mentorController.js
+// Clean SSE mentor chat with UTF-8 sanitization and robust error handling
 
-// Mentor chat route with SSE (Server-Sent Events) streaming
+const { generateMentorResponse } = require('../utils/mentorResponse');
+
+// tiny sanitizer to kill smart quotes / NBSP / stray bytes (Â, �)
+function cleanText(s) {
+  return String(s || '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/\uFFFD/g, '') // replacement char
+    .replace(/Â/g, '')      // common stray byte
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 exports.mentorsChat = (req, res) => {
-    try {
-        console.log('Mentor chat request received:', req.body);
-        
-        const { mentor, user_text, userText, preset, options } = req.body;
-        
-        // Handle both user_text and userText (Flutter sends user_text)
-        const actualUserText = user_text || userText;
-        
-        if (!mentor || !actualUserText || !preset) {
-            return res.status(400).json({ 
-                error: 'Missing required fields: mentor, user_text, and preset are required',
-                received: { mentor, user_text: actualUserText, preset }
-            });
-        }
+  try {
+    const { mentor, user_text, userText, preset, options } = req.body || {};
+    const actualUserText = user_text || userText;
+    const mode = preset || 'chat';
 
-        console.log(`Processing mentor chat: ${mentor} - ${preset} - "${actualUserText}"`);
-        
-        // Set up SSE headers
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
-        
-        // Generate mentor response
-        const mentorResponse = generateMentorResponse(mentor, actualUserText, preset, options);
-        
-        // Stream the response
-        res.write(`data: ${JSON.stringify({ text: mentorResponse })}\n\n`);
+    // Basic validation
+    if (!mentor || !actualUserText || !mode) {
+      return res.status(400).json({
+        error: 'Missing required fields: mentor, user_text (or userText), and preset',
+        received: { mentor, user_text: actualUserText, preset: mode }
+      });
+    }
+
+    console.log(`👂 Mentor chat: mentor=${mentor}, preset=${mode}, text="${actualUserText?.slice(0, 120)}${actualUserText?.length > 120 ? '…' : ''}"`);
+
+    // SSE headers
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // nginx: disable buffering
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Cache-Control, Content-Type');
+
+    // Keep-alive heartbeat (prevents proxies from closing)
+    const heartbeat = setInterval(() => {
+      try { res.write(`: ping\n\n`); } catch (_) {}
+    }, 15000);
+
+    const endStream = () => {
+      clearInterval(heartbeat);
+      try {
         res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
         res.end();
-        
-    } catch (error) {
-        console.error('Mentor chat error:', error);
-        
-        // If headers not sent yet, send error as JSON
-        if (!res.headersSent) {
-            res.status(500).json({ 
-                error: 'Failed to generate mentor response',
-                details: process.env.NODE_ENV === 'development' ? error.message : undefined
-            });
-        } else {
-            // If streaming already started, send error in stream
-            res.write(`data: ${JSON.stringify({ error: 'Failed to generate response' })}\n\n`);
-            res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-            res.end();
-        }
-    }
-};
-
-// Generate mentor response based on mentor type and preset
-function generateMentorResponse(mentor, userText, preset, options = {}) {
-    console.log(`Generating response for ${mentor} with preset ${preset}`);
-    
-    // Mentor personas
-    const mentorPersonas = {
-        casanova: {
-            name: 'Casanova',
-            style: 'charming and sophisticated',
-            greeting: 'Ah, my friend...'
-        },
-        cleopatra: {
-            name: 'Cleopatra',
-            style: 'powerful and strategic',
-            greeting: 'Listen well...'
-        },
-        machiavelli: {
-            name: 'Machiavelli',
-            style: 'cunning and practical',
-            greeting: 'In matters of strategy...'
-        },
-        sun_tzu: {
-            name: 'Sun Tzu',
-            style: 'wise and strategic',
-            greeting: 'Ancient wisdom teaches...'
-        },
-        marcus_aurelius: {
-            name: 'Marcus Aurelius',
-            style: 'stoic and philosophical',
-            greeting: 'Reflect upon this...'
-        },
-        churchill: {
-            name: 'Churchill',
-            style: 'resolute and inspiring',
-            greeting: 'In times like these...'
-        }
+      } catch (_) {}
     };
-    
-    const selectedMentor = mentorPersonas[mentor] || mentorPersonas.casanova;
-    
-    // Generate response based on preset
-    let response;
-    switch (preset) {
-        case 'drill':
-            response = `${selectedMentor.greeting} Let me challenge your thinking about this situation. What specific outcome are you truly seeking here? Consider the deeper motivations at play.`;
-            break;
-        case 'advise':
-            response = `${selectedMentor.greeting} Based on what you've shared, I see this situation requires careful consideration. The path forward involves understanding both yourself and the other person's perspective. Authentic connection cannot be forced, only cultivated through genuine interaction and mutual respect.`;
-            break;
-        case 'roleplay':
-            response = `${selectedMentor.greeting} Let us practice this scenario. I shall play different roles to help you understand various perspectives. What would you say if the other person responded with hesitation or uncertainty?`;
-            break;
-        case 'chat':
-        default:
-            response = `${selectedMentor.greeting} I understand your situation. True connection comes from authenticity and mutual respect. Rather than trying to "get" someone, focus on being your genuine self and building a foundation of trust and friendship. What matters most is that both people feel comfortable and respected.`;
-            break;
+
+    // Start generator (EventEmitter) from utils
+    const emitter = generateMentorResponse(mentor, actualUserText, mode, options);
+
+    emitter.on('data', (chunk) => {
+      try {
+        const payload = {
+          ...chunk,
+          text: cleanText(chunk?.text),
+        };
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      } catch (e) {
+        console.error('SSE write error:', e);
+      }
+    });
+
+    emitter.on('end', () => {
+      endStream();
+    });
+
+    emitter.on('error', (err) => {
+      console.error('SSE stream error:', err);
+      try {
+        res.write(`data: ${JSON.stringify({ error: 'Failed to generate response' })}\n\n`);
+      } catch (_) {}
+      endStream();
+    });
+
+    // If client disconnects
+    req.on('close', () => {
+      console.log('🔌 Client closed SSE connection');
+      clearInterval(heartbeat);
+    });
+
+  } catch (error) {
+    console.error('Mentor chat fatal error:', error);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: 'Failed to generate mentor response' });
     }
-    
-    return response;
-}
+    try {
+      res.write(`data: ${JSON.stringify({ error: 'Failed to generate response' })}\n\n`);
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } catch (_) {}
+  }
+};
