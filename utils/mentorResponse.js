@@ -3,7 +3,7 @@
 const EventEmitter = require('events');
 const { getMentorResponse } = require('../services/aiService');
 
-/* ───────────────────────── Text cleanup to kill blobs/mojibake ───────────────────────── */
+/* ─────────────────────── Text cleanup to kill blobs/mojibake ─────────────────────── */
 
 function normalizeForClient(text = '') {
   return String(text)
@@ -27,14 +27,14 @@ function normalizeForClient(text = '') {
 function paragraphize(text = '') {
   let t = normalizeForClient(text);
 
-  // Section/line breaks that help readability for presets
+  // Make likely sections/bullets/roleplay dialogue readable
   t = t
     .replace(/\n?(Law:)/gi, '\n\n$1')
     .replace(/\n?(Do:)/gi, '\n\n$1')
-    .replace(/\n?(-\s|\u2022\s|•\s)/g, '\n$1')      // bullets each on new line
-    .replace(/\n?([A-Z][a-zA-Z]+:)/g, '\n$1');      // Dialogue: Name:
+    .replace(/\n?(-\s|•\s|\u2022\s)/g, '\n$1') // bullets
+    .replace(/\n?([A-Z][a-zA-Z]+:)/g, '\n$1'); // Name: line
 
-  // If still one wall, split by sentence boundaries into short paras
+  // If still a wall, split into short paragraphs by sentence boundaries
   if (!/\n{2,}/.test(t)) {
     t = t.replace(/([.!?])\s+(?=[A-Z“"][^\n])/g, '$1\n\n');
   }
@@ -42,7 +42,7 @@ function paragraphize(text = '') {
   return t.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/* ───────────────────────── Viral scoring helpers (used by payload) ───────────────────────── */
+/* ───────────────────────────── Virality helpers ───────────────────────────── */
 
 function scoreViral(t) {
   let s = 50;
@@ -63,10 +63,10 @@ function ensureQuotableCloser(text, mentor) {
     marcus_aurelius: 'This is the way of inner strength.',
     churchill: 'This is how legends are forged.'
   };
-  return `${text} ${closers[mentor] || closers.casanova}`;
+  return `${text} ${closers[mentor] || closers.casanova}`.trim();
 }
 
-/* ───────────────────────── Public: SSE generator used by controller ───────────────────────── */
+/* ───────────────────── Public: SSE generator used by controller ───────────────────── */
 
 exports.generateMentorResponse = (mentor, userText, preset, options = {}) => {
   const emitter = new EventEmitter();
@@ -74,7 +74,7 @@ exports.generateMentorResponse = (mentor, userText, preset, options = {}) => {
   (async () => {
     try {
       const result = await getMentorResponse(mentor, userText, preset, options);
-      const cleaned = paragraphize(result.response);
+      const cleaned = paragraphize(result.response || '');
 
       emitter.emit('data', {
         type: 'wisdom',
@@ -91,8 +91,7 @@ exports.generateMentorResponse = (mentor, userText, preset, options = {}) => {
       console.error('💥 WISDOM GENERATION ERROR:', error?.message || error);
 
       let fallback =
-        `Here’s the uncomfortable truth: you talk like someone asking permission. Attraction rewards leadership, mystery, and decisive language. Speak like an experience, not a request.\n\nLaw: Lead the frame or lose it.`;
-
+        'Here’s the uncomfortable truth: you talk like someone asking permission. Attraction rewards leadership, mystery, and decisive language. Speak like an experience, not a request.\n\nLaw: Lead the frame or lose it.';
       fallback = ensureQuotableCloser(paragraphize(fallback), mentor);
 
       emitter.emit('data', {
@@ -113,7 +112,7 @@ exports.generateMentorResponse = (mentor, userText, preset, options = {}) => {
   return emitter;
 };
 
-/* ───────────────────────── Optional: persona metadata (kept for compatibility) ───────────────────────── */
+/* ───────────────────────── Persona metadata (compatibility) ───────────────────────── */
 
 exports.getPersonaForMentor = (mentor) => {
   const personas = {
@@ -163,16 +162,14 @@ exports.getPersonaForMentor = (mentor) => {
   return personas[mentor] || personas.casanova;
 };
 
-/* ───────────────────────── Optional: virality helpers (kept for compatibility) ───────────────────────── */
+/* ─────────────────────────── Virality helpers (compat) ─────────────────────────── */
 
-exports.analyzeWisdomVirality = (response, mentor, preset) => scoreViral(String(response || ''));
-exports.enhanceWisdomForVirality = (response, mentor) => ensureQuotableCloser(String(response || ''), mentor);
+exports.analyzeWisdomVirality = (response) => scoreViral(String(response || ''));
+exports.enhanceWisdomForVirality = (response, mentor) =>
+  ensureQuotableCloser(String(response || ''), mentor);
 
-// Legacy aliases (backward compatibility)
+/* ───────────────────────── Legacy aliases for compatibility ───────────────────────── */
+
 exports.generateMentorResponseLegacy = exports.generateMentorResponse;
 exports.getFallbackResponse = (mentor) =>
-  ensureQuotableCloser(
-    paragraphize('Law: Lead the frame or lose it.'),
-    mentor
-  );
-```0
+  ensureQuotableCloser(paragraphize('Law: Lead the frame or lose it.'), mentor);
