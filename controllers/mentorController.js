@@ -1,74 +1,78 @@
 // controllers/mentorController.js
-
 const { generateMentorResponse } = require('../utils/mentorResponse');
 
-// Mentor chat route with SSE (Server-Sent Events) streaming
 exports.mentorsChat = (req, res) => {
   try {
-    // Accept both Flutter (user_text) and web (userText)
     const { mentor, user_text, userText, preset, options } = req.body || {};
     const actualUserText = user_text || userText;
 
-    console.log('Mentor chat request received:', {
-      mentor,
-      preset,
-      hasText: !!actualUserText
-    });
-
     if (!mentor || !actualUserText || !preset) {
       return res.status(400).json({
-        error:
-          'Missing required fields: mentor, user_text (or userText), and preset are required',
-        received: { mentor, user_text: actualUserText, preset }
+        error: 'Missing required fields: mentor, user_text (or userText), preset'
       });
     }
 
-    // SSE headers (UTF-8 & proxy-safe)
+    // SSE headers with explicit UTF-8 (prevents Â / mojibake)
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no'); // for Nginx
-    res.flushHeaders?.();
+    res.setHeader('Access-Control-Allow-Origin', '*');
 
-    // Keep-alive heartbeat (prevents timeouts behind proxies)
+    // Flush a prelude line to lock encoding on some proxies
+    res.write(':' + Array(2049).join(' ') + '\n'); // 2KB padding
+    res.write('event: init\n');
+    res.write(`data: ${JSON.stringify({ ok: true })}\n\n`);
+
+    // Heartbeat every 15s so connections don’t die
     const heartbeat = setInterval(() => {
-      try {
-        res.write(': ping\n\n');
-      } catch {}
+      try { res.write(': ping\n\n'); } catch {}
     }, 15000);
 
-    // Stream AI wisdom
     const stream = generateMentorResponse(mentor, actualUserText, preset, options);
 
     stream.on('data', (chunk) => {
-      // normalize small payload shape for client
-      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      // chunk.text is already normalized & paragraphized in utils
+      const payload = {
+        type: chunk.type || 'wisdom',
+        text: chunk.text,
+        mentor,
+        preset,
+        viral_score: chunk.viral_score || 0,
+        wisdom_level: chunk.wisdom_level || 'legendary',
+        fallback: !!chunk.fallback,
+        timestamp: chunk.timestamp
+      };
+      // Ensure UTF-8 write
+      res.write(`data: ${JSON.stringify(payload)}\n\n`, 'utf8');
     });
 
     stream.on('end', () => {
-      res.write('data: {"done": true}\n\n');
       clearInterval(heartbeat);
+      res.write('data: {"done": true}\n\n', 'utf8');
       res.end();
     });
 
     stream.on('error', (err) => {
-      console.error('SSE stream error:', err);
-      try {
-        res.write(`data: ${JSON.stringify({ error: 'Failed to generate response' })}\n\n`);
-        res.write('data: {"done": true}\n\n');
-      } catch {}
       clearInterval(heartbeat);
-      res.end();
+      console.error('SSE error:', err);
+      try {
+        res.write(`data: ${JSON.stringify({ error: 'Stream error' })}\n\n`, 'utf8');
+        res.write('data: {"done": true}\n\n', 'utf8');
+      } finally {
+        res.end();
+      }
     });
-  } catch (error) {
-    console.error('Mentor chat error:', error);
+  } catch (err) {
+    console.error('mentorController fatal:', err);
     if (!res.headersSent) {
-      return res.status(500).json({ error: 'Failed to generate mentor response' });
+      return res.status(500).json({ error: 'Failed to start mentor stream' });
     }
     try {
-      res.write(`data: ${JSON.stringify({ error: 'Failed to generate response' })}\n\n`);
-      res.write('data: {"done": true}\n\n');
-    } catch {}
-    res.end();
+      res.write(`data: ${JSON.stringify({ error: 'Internal failure' })}\n\n`, 'utf8');
+      res.write('data: {"done": true}\n\n', 'utf8');
+    } finally {
+      res.end();
+    }
   }
 };
