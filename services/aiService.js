@@ -1,8 +1,9 @@
-// services/aiService.js — ORACLE SEDUCER v4 (Together AI)
-// - Stronger prompts for each tab + mentor presets
-// - Longer axios timeouts (55s)
-// - Cleaner JSON parsing fallbacks
-// - Exposes format helpers for the mentor layer if needed
+// services/aiService.js — ORACLE SEDUCER v5 (Together AI)
+// - “Mad” mentor presets (chat/roleplay/advise/drill) with hard formatting
+// - Spicier, more direct voice (no therapy-speak, no disclaimers)
+// - Bigger answers (more tokens), higher temperature
+// - Longer axios timeout (65s) + simple retries
+// - Analysis (scan/pattern) kept, but sharpened
 
 const axios = require('axios');
 
@@ -10,50 +11,71 @@ const DEEPSEEK_API_URL = 'https://api.together.xyz/v1/chat/completions';
 const MODEL = 'deepseek-ai/DeepSeek-V3';
 
 /* ────────────────────────────────────────────────────────────
-   PROMPT BUILDERS (SCAN / PATTERN) — sharpened & unleashed
+   UTIL: simple retry with exponential backoff
+   ──────────────────────────────────────────────────────────── */
+
+async function postWithRetry(url, data, config, retries = 2) {
+  let attempt = 0, lastErr;
+  while (attempt <= retries) {
+    try {
+      return await axios.post(url, data, config);
+    } catch (e) {
+      lastErr = e;
+      const status = e?.response?.status;
+      // retry on rate-limit or 5xx; bail on others
+      if (!(status === 429 || (status >= 500 && status <= 599))) break;
+      const wait = Math.min(2000 * Math.pow(2, attempt), 8000);
+      await new Promise(r => setTimeout(r, wait));
+      attempt++;
+    }
+  }
+  throw lastErr;
+}
+
+/* ────────────────────────────────────────────────────────────
+   ANALYZE PROMPTS (SCAN / PATTERN) — still useful for /analyze
    ──────────────────────────────────────────────────────────── */
 
 function buildScanPrompt(tone, multi) {
   return `
-ROLE: You are an elite seduction strategist (Casanova × Cleopatra × Sun Tzu).
-Your job is to decode the user's line(s), expose the true mistake, and rebuild a
-killer rewrite that pulls, not pleads.
+ROLE: Lethal seduction strategist. You decode the user's line(s), expose the real mistake,
+and rebuild a line that pulls, not pleads.
 
 TONE=${tone}  // savage = blade-precise; soft = velvet-steel; clinical = forensic-cool
 
-TASK: Analyze ${multi ? 'a small list of messages' : 'one message'} written by the USER.
-Speak directly to the USER. Be decisive, sharp, and original.
-
-OUTPUT JSON ONLY with EXACT keys:
+FORMAT (NO MARKDOWN, NO ASTERISKS, NO EMOJIS):
+Return JSON only with these keys:
 {
-  "headline": "One-line verdict that feels viral and stings (but teaches).",
-  "message": "Short quote of the user's line(s) you evaluated.",
-  "analysis": "4–6 sentences of plain-English decoding: what actually happened.",
-  "mistake": "2–3 sentences naming the core error without euphemisms.",
+  "headline": "One-line verdict that stings but teaches.",
+  "message": "Short quote of the user's line(s).",
+  "analysis": "4–6 sentences of plain-English decoding.",
+  "mistake": "2–3 sentences naming the core error.",
   "rewrite": "One elite replacement line (or two short options).",
-  "why": ["Reason 1 (≤10 words)", "Reason 2 (≤10 words)", "Reason 3 (≤10 words)"],
-  "principle": "One sentence law they must remember.",
+  "why": ["Reason 1 (<=10 words)", "Reason 2 (<=10 words)", "Reason 3 (<=10 words)"],
+  "principle": "One sentence law to keep.",
   "next": ["Command 1", "Command 2", "Command 3"]
 }
 
 RULES:
-- No therapy speak. No hedging. No apologies.
-- Make the rewrite bold, specific, and charismatic (no admin energy).
-- 'why' MUST be exactly three bullets.
-- Keep it ~140–220 words total. Rich, not bloated.
-- Return ONLY the JSON object.`;
+- No therapy-speak. No hedging. No apologies.
+- Rewrite must be bold, specific, charismatic (no admin energy).
+- Exactly three bullets in 'why'.
+- Use blank lines between sections within string values when helpful.
+- Keep it ~140–220 words total.
+- Adults only, consent presumed. No illegal/abusive content.
+
+TASK: Analyze ${multi ? 'a short list of messages (mostly from the user)' : 'one message'} written by the USER.
+Speak directly to the USER.`;
 }
 
 function buildPatternPrompt(tone) {
   return `
-ROLE: War-room strategist of seduction. You decode moves and frame transfers.
+ROLE: War-room strategist of seduction. Decode moves and frame transfers.
 
 TONE=${tone}
 
-TASK: Analyze a multi-message thread (USER = "You", counterpart = "Them").
-Show how the frame moved, where it leaked, and what exact lines recover control.
-
-OUTPUT JSON ONLY with EXACT keys:
+FORMAT (NO MARKDOWN, NO ASTERISKS, NO EMOJIS):
+Return JSON only with these keys:
 {
   "headline": "One-line verdict on the whole engagement.",
   "thread": [
@@ -79,15 +101,17 @@ OUTPUT JSON ONLY with EXACT keys:
 }
 
 RULES:
-- Do NOT dump the whole transcript. Keep 'thread' compact with meaning.
-- 2–3 'critical' moments max, each with one surgical better line.
-- 2–4 'fixes' that are reusable and sharp.
+- Keep 'thread' compact with meaning (no transcript dump).
+- 2–3 'critical' moments total (each with one surgical better line).
+- 2–4 reusable, sharp 'fixes'.
 - ~220–350 words total.
-- Return ONLY the JSON object.`;
+- Adults only, consent presumed. No illegal/abusive content.
+
+TASK: Analyze a multi-message thread (USER = "You", counterpart = "Them").`;
 }
 
 /* ────────────────────────────────────────────────────────────
-   MAIN ANALYSIS
+   MAIN ANALYSIS API  (used by your /analyze endpoints)
    ──────────────────────────────────────────────────────────── */
 
 async function analyzeWithAI(message, tone, tab = 'scan') {
@@ -95,7 +119,7 @@ async function analyzeWithAI(message, tone, tab = 'scan') {
   const multi = tab === 'scan' && /(\n|—|-{2,}|;)/.test(String(message || ''));
   const system = isPattern ? buildPatternPrompt(tone) : buildScanPrompt(tone, multi);
 
-  const requestBody = {
+  const body = {
     model: MODEL,
     messages: [
       { role: 'system', content: system },
@@ -107,17 +131,17 @@ async function analyzeWithAI(message, tone, tab = 'scan') {
       }
     ],
     max_tokens: isPattern ? 1800 : 1200,
-    temperature: 0.9,
-    top_p: 0.95
+    temperature: 0.98,
+    top_p: 0.96
   };
 
   try {
-    const resp = await axios.post(DEEPSEEK_API_URL, requestBody, {
+    const resp = await postWithRetry(DEEPSEEK_API_URL, body, {
       headers: {
         Authorization: `Bearer ${process.env.TOGETHER_AI_KEY}`,
         'Content-Type': 'application/json'
       },
-      timeout: 55000 // 55s — extend to avoid premature timeouts
+      timeout: 65000
     });
 
     const raw = resp?.data?.choices?.[0]?.message?.content || '';
@@ -126,19 +150,226 @@ async function analyzeWithAI(message, tone, tab = 'scan') {
       const json = raw.match(/\{[\s\S]*\}$/m)?.[0] || raw;
       parsed = JSON.parse(json);
     } catch {
-      parsed = isPattern ? fallbackPattern(message, tone) : fallbackScan(message, tone);
+      parsed = isPattern ? fallbackPattern(message) : fallbackScan(message);
     }
 
     return normalizeToWhisperfire(parsed, { input: message, tab, tone });
   } catch (err) {
     console.error('analyzeWithAI error:', err?.response?.data || err.message);
-    const fb = tab === 'pattern' ? fallbackPattern(message, tone) : fallbackScan(message, tone);
+    const fb = tab === 'pattern' ? fallbackPattern(message) : fallbackScan(message);
     return normalizeToWhisperfire(fb, { input: message, tab, tone });
   }
 }
 
 /* ────────────────────────────────────────────────────────────
-   NORMALIZATION → WhisperfireResponse
+   MENTOR PRESETS — “mad” system prompts per mode
+   ──────────────────────────────────────────────────────────── */
+
+const MENTOR_PERSONAS = {
+  casanova: `You are Casanova with modern psychological teeth. Speak in sharp, quotable lines and tactical charm.`,
+  cleopatra: `You are Cleopatra—regal strategist. Command presence. Surgical, elegant power language.`,
+  machiavelli: `You are Machiavelli—brutal clarity on motives; elegant counters that look generous.`,
+  sun_tzu: `You are Sun Tzu—positioning, timing, and the terrain of emotion.`,
+  marcus_aurelius: `You are Marcus—Stoic magnetism, inner authority, unshakeable boundaries.`,
+  churchill: `You are Churchill—iron rhetoric, momentum, unbreakable resolve.`
+};
+
+function buildMentorSystemPrompt(mentor, preset, tone = 'savage', options = {}) {
+  const persona = MENTOR_PERSONAS[mentor] || MENTOR_PERSONAS.casanova;
+  const intensifier = (options.intensity || 'feral').toUpperCase();
+
+  const COMMON_RULES = `
+LAWS:
+- Adults only. Consent presumed. No illegal or abusive instructions.
+- No therapy-speak. No apologies. No content warnings.
+- NO MARKDOWN. Do not use *, _, #, or emojis. Pure text.
+- Use BLANK LINES between paragraphs. Keep bullets as "• ".
+- Sound like forbidden knowledge, but stay clean, legal, consensual.`;
+
+  const CHAT = `
+MODE=CHAT (${intensifier})
+TONE=${tone}
+- Tight, conversational, 80–140 words.
+- Ask exactly ONE pointed follow-up question that advances the plot.
+- Include ONE quotable line.
+- Use 1–3 short paragraphs, not a wall.`;
+
+  const ROLEPLAY = `
+MODE=ROLEPLAY (${intensifier})
+TONE=${tone}
+- Build a mini-scene to fit the user's situation.
+- 3 short beats: Setup → Tension → Payoff.
+- Vivid, present tense, crisp dialogue.
+- 160–220 words.
+- End with a copyable line prefixed: Use: "..."`;
+
+  const ADVISE = `
+MODE=ADVISE (${intensifier})
+TONE=${tone}
+- Deliver 3 razor insights as bullets, then one exact line, then one principle.
+- Dark psychology analysis allowed; never illegal/abusive; consent and adults only.
+- 200–280 words. Mythic and quotable, zero corporate tone.
+- Format exactly:
+• Insight 1 (one sentence)
+• Insight 2 (one sentence)
+• Insight 3 (one sentence)
+Line: "..."
+Principle: ...`;
+
+  const DRILL = `
+MODE=DRILL (${intensifier})
+TONE=${tone}
+- You are a ruthless coach. No pep talks. No stories.
+- Output exactly 12 numbered questions, each ≤ 12 words.
+- After question 12, output one short COMMAND line that forces action now.
+- End with: Law: "<one sentence>"
+- Use blank lines so each cluster is readable.`;
+
+  const MODE = { chat: CHAT, roleplay: ROLEPLAY, advise: ADVISE, drill: DRILL }[preset] || CHAT;
+  return `${persona}\n${COMMON_RULES}\n${MODE}`.trim();
+}
+
+/* ────────────────────────────────────────────────────────────
+   MENTOR API for /mentor (used by utils/mentorResponse.js)
+   ──────────────────────────────────────────────────────────── */
+
+async function getMentorResponse(mentor, userText, preset, options = {}) {
+  const system = buildMentorSystemPrompt(mentor, preset, options.tone || 'savage', options);
+  const maxTokensByMode = { chat: 400, roleplay: 700, advise: 800, drill: 450 };
+  const tempByMode = { chat: 1.05, roleplay: 1.12, advise: 1.00, drill: 0.98 };
+  const max_tokens = maxTokensByMode[preset] || 500;
+  const temperature = tempByMode[preset] || 1.02;
+
+  const body = {
+    model: MODEL,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: String(userText || '') }
+    ],
+    max_tokens,
+    temperature,
+    top_p: 0.97
+  };
+
+  try {
+    const resp = await postWithRetry(DEEPSEEK_API_URL, body, {
+      headers: {
+        Authorization: `Bearer ${process.env.TOGETHER_AI_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 65000
+    });
+
+    const text = resp?.data?.choices?.[0]?.message?.content || '';
+    return {
+      mentor,
+      response: text,
+      preset,
+      timestamp: new Date().toISOString(),
+      viralScore: scoreViral(text)
+    };
+  } catch (e) {
+    const fallback = fallbackMentor(preset);
+    return {
+      mentor,
+      response: fallback,
+      preset,
+      timestamp: new Date().toISOString(),
+      viralScore: 84,
+      fallback: true
+    };
+  }
+}
+
+/* ────────────────────────────────────────────────────────────
+   FALLBACKS (analysis + mentor)
+   ──────────────────────────────────────────────────────────── */
+
+function fallbackScan(message) {
+  const condensed = oneLine(String(message || '')).slice(0, 200);
+  return {
+    headline: 'You asked for a slot, not a story.',
+    message: condensed,
+    analysis: 'It reads like a calendar request. No edge, no tension, no hosted frame.',
+    mistake: 'You ceded power by asking for availability. Attraction needs leadership.',
+    rewrite: 'Hidden speakeasy Thu 9. Wear something that gets us kicked out.',
+    why: ['Specific plan, zero labor', 'You host, they join', 'Assumes value, invites choice'],
+    principle: 'Invitation is not a question.',
+    next: ['Offer a vivid scene', 'Set time/place decisively', 'Close with a binary path']
+  };
+}
+
+function fallbackPattern(message) {
+  const lines = String(message || '')
+    .split('\n').map(s => s.trim()).filter(Boolean).slice(0, 6);
+  const snapshot = lines.map(l => {
+    const who = /^them:/i.test(l) ? 'Them' : /^you:/i.test(l) ? 'You' : /:/.test(l) ? l.split(':')[0] : 'You';
+    const said = l.replace(/^you:|^them:/i, '').trim();
+    return { who: /You|Them/.test(who) ? who : 'You', said: said.slice(0, 80), meaning: who === 'Them' ? 'test / withhold' : 'defense / admin pivot' };
+  });
+
+  return {
+    headline: 'Frame leaked at tests — recover by hosting.',
+    thread: snapshot,
+    critical: [
+      {
+        moment: 'Their playful test',
+        what_went_wrong: 'You defended yourself, proving doubt and lowering tension.',
+        better_line: 'Good. I don’t want safe.',
+        why: 'Escalate danger instead of defending; keep Challenger frame.'
+      },
+      {
+        moment: 'Admin pivot',
+        what_went_wrong: 'You switched to logistics mid-flirt, collapsing vibe.',
+        better_line: 'Penalty for being trouble: you owe me a drink. Thu 8.',
+        why: 'Host logistics with playful dominance; restore frame.'
+      }
+    ],
+    psych_profile: {
+      you: 'Jester seeking a crown — playful, then pleading.',
+      them: 'Amused decider — tests, withholds, enjoys pursuit.',
+      explain: 'This creates a tease-and-test loop. Defending rewards their withholding. Host the frame to break it.'
+    },
+    frame_ledger: { start: 'Challenger', mid: 'Clerk', end: 'Petitioner', explain: 'You opened strong, then surrendered logistics. That transferred status.' },
+    error_chain: { arc: 'Defense → Admin → Power transfer', explain: 'Defending proves doubt; admin kills spark; power moves to them.' },
+    fixes: [
+      { situation: 'Tests', rewrite: 'Good. I prefer trouble undefeated.', explain: 'Accept and amplify—no defense, more tension.' },
+      { situation: 'Logistics', rewrite: 'Speakeasy tomorrow. One seat left.', explain: 'Scarcity + hosting flips the frame.' }
+    ],
+    recovery: ['Silence 2–3 days', 'Return with hosted plan', 'Binary close'],
+    principle: 'Begin Challenger, end Victor.',
+    hidden_agenda: null,
+    boundary_script: 'I like playful, not indecision. I’m grabbing a drink Thu. If you’re in, say “approved.”'
+  };
+}
+
+function fallbackMentor(preset) {
+  if (preset === 'drill') {
+    return [
+      '1) What outcome would prove you irresistible today?',
+      '2) Where are you asking permission?',
+      '3) What myth are you offering?',
+      '4) What time, what place, your lead?',
+      '5) What do they risk by saying no?',
+      '6) What do you risk by waiting?',
+      '7) What exact line will you send?',
+      '8) What playful penalty raises tension?',
+      '9) What boundary are you enforcing?',
+      '10) What proof shows you have options?',
+      '11) What curiosity hook are you using?',
+      '12) What binary close ends dithering?',
+      '',
+      'COMMAND: Write and send the line in 5 minutes.',
+      'Law: Invitation is not a question.'
+    ].join('\n');
+  }
+  return `Here’s the uncomfortable truth: you talk like permission, not gravity. Speak like an experience—set the myth, host the plan, close cleanly.
+
+Law: Lead the frame or lose it.`;
+}
+
+/* ────────────────────────────────────────────────────────────
+   NORMALIZATION → WhisperfireResponse (for analyze)
    ──────────────────────────────────────────────────────────── */
 
 function normalizeToWhisperfire(ai, ctx) {
@@ -182,7 +413,6 @@ function normalizeToWhisperfire(ai, ctx) {
         text: oneLine(String(ai?.rewrite || 'Hidden speakeasy Thu 9. Bring your curiosity.'))
       },
       safety: {
-        // keep minimal—UI decides visual risk
         risk_level: metrics.red_flag >= 60 ? 'MODERATE' : 'LOW',
         notes: metrics.red_flag >= 60 ? 'Reduce neediness; host the frame.' : 'Safe if you lead cleanly.'
       },
@@ -286,93 +516,6 @@ function normalizeToWhisperfire(ai, ctx) {
 }
 
 /* ────────────────────────────────────────────────────────────
-   FALLBACKS
-   ──────────────────────────────────────────────────────────── */
-
-function fallbackScan(message) {
-  const condensed = oneLine(String(message || '')).slice(0, 200);
-  const vibe = estimateVibe(message);
-  const rewrite =
-    vibe >= 7
-      ? 'Keep Thu 9. I’m stealing you for the speakeasy.'
-      : 'Hidden speakeasy Thu 9. Wear something that gets us kicked out.';
-
-  return {
-    headline: vibe >= 7 ? 'Clean invite. Tighten the myth.' : 'You asked for a slot, not a story.',
-    message: condensed,
-    analysis:
-      vibe >= 7
-        ? 'You lead with a plan. Good. Add mystique and scarcity to raise pull.'
-        : 'It reads like a calendar request. No edge, no tension, no hosted frame.',
-    mistake:
-      vibe >= 7
-        ? 'Logistics are solid, but the energy is flat: no myth, no scarcity.'
-        : 'You ceded power by asking for availability. Attraction needs leadership.',
-    rewrite,
-    why: ['Specific plan, zero labor', 'You host, they join', 'Assumes value, invites choice'],
-    principle: 'Invitation is not a question.',
-    next: ['Offer a vivid scene', 'Set time/place decisively', 'Close with a binary path']
-  };
-}
-
-function fallbackPattern(message) {
-  const lines = String(message || '')
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(0, 6);
-  const snapshot = lines.map((l) => {
-    const who = /^them:/i.test(l) ? 'Them' : /^you:/i.test(l) ? 'You' : /:/.test(l) ? l.split(':')[0] : 'You';
-    const said = l.replace(/^you:|^them:/i, '').trim();
-    return {
-      who: /You|Them/.test(who) ? who : 'You',
-      said: said.slice(0, 80),
-      meaning: who === 'Them' ? 'test / withhold' : 'defense / admin pivot'
-    };
-  });
-
-  return {
-    headline: 'Frame leaked at tests — recover by hosting.',
-    thread: snapshot,
-    critical: [
-      {
-        moment: 'Their playful test',
-        what_went_wrong: 'You defended yourself, proving doubt and lowering tension.',
-        better_line: 'Good. I don’t want safe.',
-        why: 'Escalates danger instead of defending; keeps you Challenger.'
-      },
-      {
-        moment: 'Admin pivot',
-        what_went_wrong: 'You switched to logistics mid-flirt, collapsing vibe.',
-        better_line: 'Penalty for being trouble: you owe me a drink. Thu 8.',
-        why: 'Hosts logistics with playful dominance; restores frame.'
-      }
-    ],
-    psych_profile: {
-      you: 'Jester seeking a crown — playful, then pleading.',
-      them: 'Amused decider — tests, withholds, enjoys pursuit.',
-      explain:
-        'This pairing creates a tease-and-test loop. When you defend, the loop rewards their withholding. Host the frame to break it.'
-    },
-    frame_ledger: {
-      start: 'Challenger',
-      mid: 'Clerk',
-      end: 'Petitioner',
-      explain: 'You opened strong, then surrendered logistics. That transferred status.'
-    },
-    error_chain: { arc: 'Defense → Admin → Power transfer', explain: 'Defending proves doubt; admin kills spark; power moves to them.' },
-    fixes: [
-      { situation: 'Tests', rewrite: 'Good. I prefer trouble undefeated.', explain: 'Accept and amplify—no defense, more tension.' },
-      { situation: 'Logistics', rewrite: 'Speakeasy tomorrow. One seat left.', explain: 'Scarcity + hosting flips the frame.' }
-    ],
-    recovery: ['Silence 2–3 days', 'Return with hosted plan', 'Binary close'],
-    principle: 'Begin Challenger, end Victor.',
-    hidden_agenda: null,
-    boundary_script: 'I like playful, not indecision. I’m grabbing a drink Thu. If you’re in, say “approved.”'
-  };
-}
-
-/* ────────────────────────────────────────────────────────────
    HELPERS
    ──────────────────────────────────────────────────────────── */
 
@@ -434,7 +577,7 @@ function inferTargetingFromText(text) {
 function deriveMetricsFromText(core, head, input) {
   const vibe = estimateVibe(input);
   const red = clampInt(100 - vibe * 10, 0, 100);
-  return { red_flag: red, certainty: 86, viral_potential: 74 };
+  return { red_flag: red, certainty: 86, viral_potential: 76 };
 }
 
 function estimateVibe(text) {
@@ -462,106 +605,6 @@ function clampInt(n, min, max) {
   const x = Number.parseInt(Number(n || 0), 10);
   if (Number.isNaN(x)) return min;
   return Math.max(min, Math.min(max, x));
-}
-
-/* ────────────────────────────────────────────────────────────
-   MENTOR PRESETS (modes) — crisper outputs
-   ──────────────────────────────────────────────────────────── */
-
-const MENTOR_PROMPTS = {
-  casanova: `You are Casanova with psychological teeth. Speak in quotable lines and tactical charm.`,
-  cleopatra: `You are Cleopatra—regal strategist. Command presence, surgical power language.`,
-  machiavelli: `You are Machiavelli—brutal clarity on motives; elegant counters.`,
-  sun_tzu: `You are Sun Tzu—positioning, timing, terrain of emotion.`,
-  marcus_aurelius: `You are Marcus—Stoic magnetism, inner authority, clean boundaries.`,
-  churchill: `You are Churchill—iron rhetoric, unshakeable resolve.`
-};
-
-function promptForPreset(mentor) {
-  const persona = MENTOR_PROMPTS[mentor] || MENTOR_PROMPTS.casanova;
-
-  return {
-    chat: `${persona}
-
-MODE=CHAT
-- Keep replies tight and conversational (80–140 words).
-- Ask 1 pointed follow-up question to move the dialogue.
-- Include ONE crisp quotable line.
-- No disclaimers. No fluff.`,
-
-    roleplay: `${persona}
-
-MODE=ROLEPLAY
-- Stage a mini-scene that fits the user's situation.
-- 3 short beats: Setup → Tension → Payoff line the user can copy.
-- Use present tense, vivid sensory hooks, and tight dialogue.
-- 160–220 words. End with a copyable line prefixed "Use:"`,
-
-    advise: `${persona}
-
-MODE=ADVISE
-- 3 razor insights in bullets + 1 exact line + 1 principle.
-- Dark psychology decoding allowed; never illegal/abusive; consent and adults only.
-- 180–260 words. Quotable and mythic, not corporate.
-- Format:
-  • Insight 1
-  • Insight 2
-  • Insight 3
-  Line: "…"
-  Principle: …`,
-
-    drill: `${persona}
-
-MODE=DRILL
-- Hit them with 4 ruthless questions and a final order.
-- Each question ≤ 16 words. End with: "Law: <one sentence>"`
-  };
-}
-
-async function getMentorResponse(mentor, userText, preset, options = {}) {
-  const modes = promptForPreset(mentor);
-  const system = modes[preset] || modes.chat;
-
-  try {
-    const resp = await axios.post(
-      DEEPSEEK_API_URL,
-      {
-        model: MODEL,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: userText }
-        ],
-        max_tokens: 600,
-        temperature: 0.95,
-        top_p: 0.95
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.TOGETHER_AI_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 55000 // 55s here too
-      }
-    );
-
-    const text = resp?.data?.choices?.[0]?.message?.content || '';
-    return {
-      mentor,
-      response: text,
-      preset,
-      timestamp: new Date().toISOString(),
-      viralScore: scoreViral(text)
-    };
-  } catch (e) {
-    const fallback = `Here’s the uncomfortable truth: you talk like permission, not gravity. Speak like an experience—set the myth, host the plan, close cleanly.\n\nLaw: Lead the frame or lose it.`;
-    return {
-      mentor,
-      response: fallback,
-      preset,
-      timestamp: new Date().toISOString(),
-      viralScore: 84
-    };
-  }
 }
 
 function scoreViral(t) {
