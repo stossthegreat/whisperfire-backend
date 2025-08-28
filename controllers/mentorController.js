@@ -14,14 +14,14 @@ exports.mentorsChat = (req, res) => {
       });
     }
 
-    // ✅ Proper UTF-8 + SSE headers (fixes mojibake like Â/Ã)
+    // ✅ Proper UTF-8 SSE headers (prevents Â/Ã junk)
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
 
-    // Keep connection alive (some proxies need ping)
+    // Keep-alive ping for proxies / load balancers
     const ping = setInterval(() => {
       try { res.write(': ping\n\n'); } catch (_) {}
     }, 15000);
@@ -29,7 +29,7 @@ exports.mentorsChat = (req, res) => {
     const stream = generateMentorResponse(mentor, actualUserText, preset, options);
 
     stream.on('data', (chunk) => {
-      // chunk already sanitized & paragraphized in utils/mentorResponse
+      // chunk.text is already cleaned + paragraphized in utils/mentorResponse
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     });
 
