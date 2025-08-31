@@ -548,7 +548,58 @@ Law: Lead the frame or lose it.`
     return { mentor, response: fallback, preset, timestamp: new Date().toISOString() };
   }
 }
+function promptForPreset(mentor) {
+  const persona = MENTOR_PROMPTS[mentor] || MENTOR_PROMPTS.casanova;
 
+  const commonRules = `
+RULES:
+- PLAIN TEXT ONLY. No Markdown, no asterisks for bullets, no code fences.
+- Separate paragraphs with ONE blank line.
+- If you need bullets, use "• " at the start of the line.
+- Keep characters ASCII where possible; use straight quotes (') and (").`;
+
+  return {
+    chat: `${persona}
+
+MODE=CHAT
+- 80–140 words.
+- Conversational. Ask ONE sharp follow-up question.
+- Include ONE quotable line.
+
+${commonRules}`,
+
+    roleplay: `${persona}
+
+MODE=ROLEPLAY
+- Mini-scene: Setup → Tension → Payoff.
+- Present tense, vivid but tight. 160–220 words.
+- End with a copyable line prefixed with: Use:
+
+${commonRules}`,
+
+    advise: `${persona}
+
+MODE=ADVISE
+- 3 sharp insights (bullets) + 1 exact line + 1 principle.
+- 180–260 words. Mythic, not corporate.
+- Format:
+• Insight 1
+• Insight 2
+• Insight 3
+Line: "..."
+Principle: ...
+
+${commonRules}`,
+
+    drill: `${persona}
+
+MODE=DRILL
+- 4 ruthless questions (<=16 words each) + one final order.
+- End with: Law: <one sentence>
+
+${commonRules}`
+  };
+}
 /* ────────────────────────────────────────────────────────────
    EXPORTS
    ──────────────────────────────────────────────────────────── */
