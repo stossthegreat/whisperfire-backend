@@ -25,16 +25,23 @@ exports.mentorsChat = (req, res) => {
       if (!res.writableEnded) res.write(`: ping\n\n`);
     }, 15000);
 
+    // Ensure we always cleanup on client disconnect
+    const endStream = () => {
+      clearInterval(keepAlive);
+      if (!res.writableEnded) {
+        try { res.end(); } catch (_) {}
+      }
+    };
+    req.on('close', endStream);
+    res.on('close', endStream);
+
     const stream = generateMentorResponse(mentor, actualUserText, preset, options);
 
     stream.on('data', (chunk) => {
       try {
         const raw = typeof chunk === 'string' ? chunk : (chunk?.text || '');
-        const clean = sanitizeForSSE(raw);
-        const payload = {
-          ...chunk,
-          text: clean
-        };
+        const clean = sanitizeForSSE(raw); // fixes Â, smart quotes, and enforces paragraph breaks
+        const payload = { ...chunk, text: clean };
         res.write(`data: ${JSON.stringify(payload)}\n\n`);
       } catch (e) {
         res.write(`data: ${JSON.stringify({ error: 'sanitize_failed' })}\n\n`);
@@ -43,19 +50,13 @@ exports.mentorsChat = (req, res) => {
 
     stream.on('end', () => {
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-      clearInterval(keepAlive);
-      res.end();
+      endStream();
     });
 
     stream.on('error', (err) => {
-      clearInterval(keepAlive);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Stream error occurred', details: err?.message });
-      } else {
-        res.write(`data: ${JSON.stringify({ error: 'Stream error occurred' })}\n\n`);
-        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-        res.end();
-      }
+      res.write(`data: ${JSON.stringify({ error: 'Stream error occurred', details: err?.message })}\n\n`);
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      endStream();
     });
   } catch (error) {
     if (!res.headersSent) {
@@ -63,7 +64,7 @@ exports.mentorsChat = (req, res) => {
     } else {
       res.write(`data: ${JSON.stringify({ error: 'Failed to generate response' })}\n\n`);
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-      res.end();
+      try { res.end(); } catch (_) {}
     }
   }
 };
