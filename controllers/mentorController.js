@@ -4,61 +4,102 @@ const { sanitizeForSSE, normalizeMentorText, asciiHardClean } = require('../util
 
 const VALID_PRESETS = new Set(['chat', 'roleplay', 'advise', 'drill']);
 
+function readParams(req) {
+  // Support POST (body) and GET (query) so EventSource works too
+  const src = (req.method === 'GET') ? (req.query || {}) : (req.body || {});
+  const { mentor, user_text, userText, preset, ...rest } = src;
+  return {
+    mentor: mentor && String(mentor).trim(),
+    preset: preset && String(preset).toLowerCase().trim(),
+    userText: (user_text || userText) && String(user_text || userText),
+    options: rest.options || rest // allow options in either shape
+  };
+}
+
+function openSSE(res) {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Nginx: disable buffering
+  // Some stacks need this to actually flush headers now
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+}
+
+function writeEvent(res, event, data) {
+  if (event) res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
 exports.mentorsChat = (req, res) => {
   try {
-    const { mentor, user_text, userText, preset, options } = req.body || {};
-    const actualUserText = user_text || userText;
+    const { mentor, preset, userText, options } = readParams(req);
 
-    if (!mentor || !actualUserText || !preset || !VALID_PRESETS.has(String(preset).toLowerCase())) {
+    if (!mentor || !userText || !preset || !VALID_PRESETS.has(preset)) {
       return res.status(400).json({
         error: 'Missing/invalid fields. Required: mentor, user_text, preset in {chat|roleplay|advise|drill}',
-        received: { mentor: !!mentor, user_text: !!actualUserText, preset }
+        received: { mentor: !!mentor, user_text: !!userText, preset }
       });
     }
 
-    // --- SSE headers (and make proxies leave it alone)
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
+    // If client didn't ask for SSE, return a plain JSON response (fallback)
+    const wantsSSE =
+      /text\/event-stream/.test(String(req.headers.accept || '')) ||
+      String(req.headers['x-wf-sse'] || '') === '1';
 
-    // NOTE: if you use compression middleware, skip it for this route.
+    if (!wantsSSE) {
+      // Non-SSE fallback (blocking)
+      const stream = generateMentorResponse(mentor, userText, preset, options || {});
+      let finalText = '';
+      stream.on('data', (chunk) => {
+        const raw = typeof chunk === 'string' ? chunk : (chunk?.text || '');
+        finalText += raw + '\n';
+      });
+      stream.on('end', () => {
+        const clean = sanitizeForSSE(asciiHardClean(normalizeMentorText(finalText))).trim();
+        return res.json({
+          success: true,
+          data: {
+            mentor,
+            preset,
+            text: clean,
+            streamed: false,
+            timestamp: new Date().toISOString()
+          }
+        });
+      });
+      stream.on('error', (err) => {
+        return res.status(500).json({ error: 'mentor_stream_failed', details: err?.message || 'unknown' });
+      });
+      return;
+    }
 
-    // Keep-alive pings so some hosts don’t close the socket
+    // SSE path
+    openSSE(res);
+
+    // Keep-alive pings
     const keepAlive = setInterval(() => {
       if (!res.writableEnded) res.write(`: ping\n\n`);
     }, 15000);
 
-    // Immediate “open” event so the UI knows the stream is alive
-    res.write(`event: open\ndata: ${JSON.stringify({ ok: true, mentor, preset })}\n\n`);
+    // Immediate open event so UI knows it's live
+    writeEvent(res, 'open', { ok: true, mentor, preset });
 
-    // Safety timer: if we haven’t sent wisdom in N seconds, send a soft tick
+    // Soft “warming up” tick if model is slow
     const softKick = setTimeout(() => {
-      if (!res.writableEnded) {
-        res.write(`event: tick\ndata: ${JSON.stringify({ status: 'warming_up' })}\n\n`);
-      }
-    }, 5000);
+      if (!res.writableEnded) writeEvent(res, 'tick', { status: 'warming_up' });
+    }, 4000);
 
-    // Stream from the mentor engine
-    const stream = generateMentorResponse(mentor, actualUserText, String(preset).toLowerCase(), options || {});
+    // Start mentor stream
+    const stream = generateMentorResponse(mentor, userText, preset, options || {});
 
     stream.on('data', (chunk) => {
       try {
-        // Accept both "string" and { text, ... }
         const raw = typeof chunk === 'string' ? chunk : (chunk?.text || '');
-        // 1) normalize unicode to plain ASCII, kill weird bullets/emoji/zero-width
-        const cleaned = asciiHardClean(normalizeMentorText(raw));
-        // 2) ensure no SSE-breaking sequences
-        const safe = sanitizeForSSE(cleaned);
-
-        const payload = {
-          ...(typeof chunk === 'object' && chunk ? chunk : { type: 'wisdom' }),
-          text: safe
-        };
-
-        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        const cleaned = sanitizeForSSE(asciiHardClean(normalizeMentorText(raw)));
+        const payload = { ...(typeof chunk === 'object' ? chunk : { type: 'wisdom' }), text: cleaned };
+        writeEvent(res, '', payload); // default message event
       } catch {
-        res.write(`data: ${JSON.stringify({ type: 'error', error: 'sanitize_failed' })}\n\n`);
+        writeEvent(res, 'error', { error: 'sanitize_failed' });
       }
     });
 
@@ -66,7 +107,7 @@ exports.mentorsChat = (req, res) => {
       clearInterval(keepAlive);
       clearTimeout(softKick);
       if (!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        writeEvent(res, '', { done: true });
         res.end();
       }
     });
@@ -75,15 +116,15 @@ exports.mentorsChat = (req, res) => {
       clearInterval(keepAlive);
       clearTimeout(softKick);
       if (!res.headersSent) {
-        res.status(500).json({ error: 'Stream error occurred', details: err?.message || 'unknown' });
+        res.status(500).json({ error: 'stream_error', details: err?.message || 'unknown' });
       } else if (!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ type: 'error', error: 'stream_error' })}\n\n`);
-        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        writeEvent(res, 'error', { error: 'stream_error' });
+        writeEvent(res, '', { done: true });
         res.end();
       }
     });
 
-    // cleanup if client disconnects
+    // Client disconnected
     req.on('close', () => {
       clearInterval(keepAlive);
       clearTimeout(softKick);
@@ -91,10 +132,10 @@ exports.mentorsChat = (req, res) => {
     });
   } catch (error) {
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to generate mentor response', details: error?.message });
+      res.status(500).json({ error: 'mentor_controller_crash', details: error?.message });
     } else if (!res.writableEnded) {
-      res.write(`data: ${JSON.stringify({ type: 'error', error: 'controller_crash' })}\n\n`);
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      writeEvent(res, 'error', { error: 'controller_crash' });
+      writeEvent(res, '', { done: true });
       res.end();
     }
   }
