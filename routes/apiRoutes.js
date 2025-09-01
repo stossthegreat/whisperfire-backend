@@ -10,8 +10,9 @@ router.post('/analyze', analysisController.unifiedAnalyze);
 router.post('/analyze/scan', analysisController.analyzeScan);
 router.post('/analyze/pattern', analysisController.analyzePattern);
 
-// Mentor (JSON fallback that always replies)
+// Mentor (JSON only for reliability)
 router.get('/mentor/health', mentorController.mentorHealth);
 router.post('/mentor/json', mentorController.mentorJSON);
+router.post('/mentor/echo', mentorController.mentorEcho);
 
 module.exports = router;
