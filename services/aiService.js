@@ -1,58 +1,35 @@
-// services/aiService.js — ORACLE SEDUCER v5 (Together AI, fixed)
-// - Correct template strings, headers, quotes
-// - Longer timeouts + retry + keep-alive agent
-// - Clean JSON parsing fallbacks
-// - Mentor presets with strict formatting
-
+// services/aiService.js — ORACLE SEDUCER (cleaned + stable + UTF-8)
 const axios = require('axios');
-const http = require('http');
-const https = require('https');
+const { sanitizeText, sanitizeDeep } = require('../utils/textSanitizer');
 
 const DEEPSEEK_API_URL = 'https://api.together.xyz/v1/chat/completions';
 const MODEL = 'deepseek-ai/DeepSeek-V3';
 
-// Keep-alive agents reduce socket churn and flakiness on long calls
-const keepAliveHttp = new http.Agent({ keepAlive: true, maxSockets: 50 });
-const keepAliveHttps = new https.Agent({ keepAlive: true, maxSockets: 50 });
-
-/* ────────────────────────────────────────────────────────────
-   UTIL: simple retry with exponential backoff
-   ──────────────────────────────────────────────────────────── */
+/* =============== Retry helper =============== */
 async function postWithRetry(url, data, config, retries = 2) {
-  let attempt = 0;
-  let lastErr;
+  let attempt = 0, lastErr;
   while (attempt <= retries) {
     try {
-      return await axios.post(url, data, {
-        httpAgent: keepAliveHttp,
-        httpsAgent: keepAliveHttps,
-        ...config,
-      });
+      return await axios.post(url, data, config);
     } catch (e) {
       lastErr = e;
       const status = e?.response?.status;
-      // retry on rate-limit or 5xx; bail on others
       if (!(status === 429 || (status >= 500 && status <= 599))) break;
       const wait = Math.min(2000 * Math.pow(2, attempt), 8000);
-      await new Promise((r) => setTimeout(r, wait));
+      await new Promise(r => setTimeout(r, wait));
       attempt++;
     }
   }
   throw lastErr;
 }
 
-/* ────────────────────────────────────────────────────────────
-   ANALYZE PROMPTS (SCAN / PATTERN)
-   ──────────────────────────────────────────────────────────── */
+/* =============== Prompts =============== */
 function buildScanPrompt(tone, multi) {
   return `
-ROLE: Lethal seduction strategist. You decode the user's line(s), expose the real mistake,
-and rebuild a line that pulls, not pleads.
+ROLE: Lethal seduction strategist. You decode the user's line(s), expose the real mistake, and rebuild a line that pulls, not pleads.
+TONE=${tone}
 
-TONE=${tone}  // savage = blade-precise; soft = velvet-steel; clinical = forensic-cool
-
-FORMAT (NO MARKDOWN, NO ASTERISKS, NO EMOJIS):
-Return JSON only with these keys:
+FORMAT (PLAIN TEXT JSON ONLY — no markdown/asterisks/emojis):
 {
   "headline": "One-line verdict that stings but teaches.",
   "message": "Short quote of the user's line(s).",
@@ -66,24 +43,18 @@ Return JSON only with these keys:
 
 RULES:
 - No therapy-speak. No hedging. No apologies.
-- Rewrite must be bold, specific, charismatic (no admin energy).
-- Exactly three bullets in 'why'.
-- Use blank lines inside string values when helpful.
-- Keep it ~140–220 words total.
-- Adults only, consent presumed. No illegal/abusive content.
+- 'why' MUST be exactly three bullets.
+- Keep ~140–220 words total. Adults only, consensual, legal.
 
-TASK: Analyze ${multi ? 'a short list of messages (mostly from the user)' : 'one message'} written by the USER.
-Speak directly to the USER.`;
+TASK: Analyze ${multi ? 'a short list of messages' : 'one message'} from the USER. Return ONLY the JSON.`.trim();
 }
 
 function buildPatternPrompt(tone) {
   return `
 ROLE: War-room strategist of seduction. Decode moves and frame transfers.
-
 TONE=${tone}
 
-FORMAT (NO MARKDOWN, NO ASTERISKS, NO EMOJIS):
-Return JSON only with these keys:
+FORMAT (PLAIN TEXT JSON ONLY — no markdown/asterisks/emojis):
 {
   "headline": "One-line verdict on the whole engagement.",
   "thread": [
@@ -109,23 +80,19 @@ Return JSON only with these keys:
 }
 
 RULES:
-- Keep 'thread' compact with meaning (no transcript dump).
-- 2–3 'critical' moments total (each with one surgical better line).
-- 2–4 reusable, sharp 'fixes'.
-- ~220–350 words total.
-- Adults only, consent presumed. No illegal/abusive content.
+- 'thread' must be compact (no transcript dump).
+- 2–3 'critical' items; 2–4 'fixes'.
+- ~220–350 words total. Adults only, consensual, legal.
 
-TASK: Analyze a multi-message thread (USER = "You", counterpart = "Them").`;
+TASK: Analyze the multi-message thread (USER = "You", other = "Them"). Return ONLY the JSON.`.trim();
 }
 
-/* ────────────────────────────────────────────────────────────
-   MAIN ANALYSIS API
-   ──────────────────────────────────────────────────────────── */
+/* =============== Analysis main =============== */
 async function analyzeWithAI(message, tone, tab = 'scan') {
   const isPattern = tab === 'pattern';
   const multi = tab === 'scan' && /(\n|—|-{2,}|;)/.test(String(message || ''));
-  const system = isPattern ? buildPatternPrompt(tone) : buildScanPrompt(tone, multi);
 
+  const system = isPattern ? buildPatternPrompt(tone) : buildScanPrompt(tone, multi);
   const userContent = isPattern
     ? `THREAD (alternating "You:" / "Them:"):\n${message}\n\nFollow the exact JSON schema.`
     : `MESSAGE(S):\n${message}\n\nFollow the exact JSON schema.`;
@@ -136,118 +103,99 @@ async function analyzeWithAI(message, tone, tab = 'scan') {
       { role: 'system', content: system },
       { role: 'user', content: userContent }
     ],
-    max_tokens: isPattern ? 1800 : 1200,
-    temperature: 0.98,
-    top_p: 0.96
+    max_tokens: isPattern ? 1600 : 900,
+    temperature: 0.9,
+    top_p: 0.95
   };
 
   try {
-    const resp = await postWithRetry(
-      DEEPSEEK_API_URL,
-      body,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.TOGETHER_AI_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 120000 // 120s (Together can be slow)
+    const resp = await postWithRetry(DEEPSEEK_API_URL, body, {
+      headers: {
+        Authorization: `Bearer ${process.env.TOGETHER_AI_KEY}`,
+        'Content-Type': 'application/json'
       },
-      2
-    );
+      timeout: 60000 // generous, but under your server.requestTimeout
+    });
 
     const raw = resp?.data?.choices?.[0]?.message?.content || '';
+    const cleanedRaw = sanitizeText(raw); // fix mojibake before JSON parse attempt
+
     let parsed;
     try {
-      const json = raw.match(/\{[\s\S]*\}$/m)?.[0] || raw;
+      const json = cleanedRaw.match(/\{[\s\S]*\}$/m)?.[0] || cleanedRaw;
       parsed = JSON.parse(json);
     } catch {
       parsed = isPattern ? fallbackPattern(message) : fallbackScan(message);
     }
 
-    return normalizeToWhisperfire(parsed, { input: message, tab, tone });
+    const normalized = normalizeToWhisperfire(parsed, { input: message, tab, tone });
+    return sanitizeDeep(normalized);
   } catch (err) {
     console.error('analyzeWithAI error:', err?.response?.data || err.message);
-    const fb = isPattern ? fallbackPattern(message) : fallbackScan(message);
-    return normalizeToWhisperfire(fb, { input: message, tab, tone });
+    const fb = tab === 'pattern' ? fallbackPattern(message) : fallbackScan(message);
+    return sanitizeDeep(normalizeToWhisperfire(fb, { input: message, tab, tone }));
   }
 }
 
-/* ────────────────────────────────────────────────────────────
-   MENTOR PRESETS — system prompts per mode
-   ──────────────────────────────────────────────────────────── */
+/* =============== Mentors =============== */
 const MENTOR_PERSONAS = {
-  casanova: 'You are Casanova with modern psychological teeth. Speak in sharp, quotable lines and tactical charm.',
-  cleopatra: 'You are Cleopatra—regal strategist. Command presence. Surgical, elegant power language.',
-  machiavelli: 'You are Machiavelli—brutal clarity on motives; elegant counters that look generous.',
-  sun_tzu: 'You are Sun Tzu—positioning, timing, and the terrain of emotion.',
-  marcus_aurelius: 'You are Marcus—Stoic magnetism, inner authority, unshakeable boundaries.',
-  churchill: 'You are Churchill—iron rhetoric, momentum, unbreakable resolve.'
+  casanova: `You are Casanova with modern psychological teeth. Speak in sharp, quotable lines and tactical charm.`,
+  cleopatra: `You are Cleopatra—regal strategist. Command presence. Surgical, elegant power language.`,
+  machiavelli: `You are Machiavelli—brutal clarity on motives; elegant counters that look generous.`,
+  sun_tzu: `You are Sun Tzu—positioning, timing, and the terrain of emotion.`,
+  marcus_aurelius: `You are Marcus—Stoic magnetism, inner authority, unshakeable boundaries.`,
+  churchill: `You are Churchill—iron rhetoric, momentum, unbreakable resolve.`
 };
 
 function buildMentorSystemPrompt(mentor, preset, tone = 'savage', options = {}) {
   const persona = MENTOR_PERSONAS[mentor] || MENTOR_PERSONAS.casanova;
-  const intensifier = String(options.intensity || 'feral').toUpperCase();
+  const intensifier = (options.intensity || 'feral').toUpperCase();
 
-  const COMMON_RULES = `
+  const RULES = `
 LAWS:
-- Adults only. Consent presumed. No illegal or abusive instructions.
+- Adults only. Consent presumed. Legal and clean.
 - No therapy-speak. No apologies. No content warnings.
-- NO MARKDOWN. Do not use *, _, #, or emojis. Pure text.
-- Use BLANK LINES between paragraphs. Keep bullets as "• ".
-- Sound like forbidden knowledge, but stay clean, legal, consensual.`;
+- NO MARKDOWN (no *, _, #, emojis). Pure text.
+- Use BLANK LINES between paragraphs. Bullets as "• ".
+`.trim();
 
-  const CHAT = `
-MODE=CHAT (${intensifier})
-TONE=${tone}
-- Tight, conversational, 80–140 words.
-- Ask exactly ONE pointed follow-up question that advances the plot.
+  const modes = {
+    chat: `
+MODE=CHAT (${intensifier})  TONE=${tone}
+- 120–180 words. 1–3 short paragraphs.
+- Exactly ONE pointed follow-up question.
 - Include ONE quotable line.
-- Use 1–3 short paragraphs, not a wall.`;
-
-  const ROLEPLAY = `
-MODE=ROLEPLAY (${intensifier})
-TONE=${tone}
-- Build a mini-scene to fit the user's situation.
-- 3 short beats: Setup → Tension → Payoff.
-- Vivid, present tense, crisp dialogue.
-- 160–220 words.
-- End with a copyable line prefixed: Use: "..."`;
-
-  const ADVISE = `
-MODE=ADVISE (${intensifier})
-TONE=${tone}
-- Deliver 3 razor insights as bullets, then one exact line, then one principle.
-- Dark psychology analysis allowed; never illegal/abusive; consent and adults only.
-- 200–280 words. Mythic and quotable, zero corporate tone.
-- Format exactly:
-• Insight 1 (one sentence)
-• Insight 2 (one sentence)
-• Insight 3 (one sentence)
+`.trim(),
+    roleplay: `
+MODE=ROLEPLAY (${intensifier})  TONE=${tone}
+- 160–220 words. Mini-scene: Setup → Tension → Payoff.
+- Vivid present tense. End with: Use: "..."
+`.trim(),
+    advise: `
+MODE=ADVISE (${intensifier})  TONE=${tone}
+- 3 sharp bullet insights, then one exact line, then one principle.
+- Format:
+• Insight 1
+• Insight 2
+• Insight 3
 Line: "..."
-Principle: ...`;
+Principle: ...
+`.trim(),
+    drill: `
+MODE=DRILL (${intensifier})  TONE=${tone}
+- Exactly 12 numbered questions (<= 12 words each).
+- Then one COMMAND line. End with: Law: "<one sentence>"
+`.trim()
+  };
 
-  const DRILL = `
-MODE=DRILL (${intensifier})
-TONE=${tone}
-- You are a ruthless coach. No pep talks. No stories.
-- Output exactly 12 numbered questions, each ≤ 12 words.
-- After question 12, output one short COMMAND line that forces action now.
-- End with: Law: "<one sentence>"
-- Use blank lines so each cluster is readable.`;
-
-  const MODE = { chat: CHAT, roleplay: ROLEPLAY, advise: ADVISE, drill: DRILL }[preset] || CHAT;
-  return `${persona}\n\n${COMMON_RULES}\n\n${MODE}`.trim();
+  const MODE = modes[preset] || modes.chat;
+  return `${persona}\n\n${RULES}\n\n${MODE}`.trim();
 }
 
-/* ────────────────────────────────────────────────────────────
-   MENTOR API
-   ──────────────────────────────────────────────────────────── */
 async function getMentorResponse(mentor, userText, preset, options = {}) {
   const system = buildMentorSystemPrompt(mentor, preset, options.tone || 'savage', options);
-  const maxTokensByMode = { chat: 400, roleplay: 700, advise: 800, drill: 450 };
-  const tempByMode = { chat: 1.05, roleplay: 1.12, advise: 1.0, drill: 0.98 };
-  const max_tokens = maxTokensByMode[preset] || 500;
-  const temperature = tempByMode[preset] || 1.02;
+  const maxTokensByMode = { chat: 400, roleplay: 700, advise: 600, drill: 450 };
+  const tempByMode = { chat: 1.0, roleplay: 1.08, advise: 0.95, drill: 0.9 };
 
   const body = {
     model: MODEL,
@@ -255,25 +203,21 @@ async function getMentorResponse(mentor, userText, preset, options = {}) {
       { role: 'system', content: system },
       { role: 'user', content: String(userText || '') }
     ],
-    max_tokens,
-    temperature,
+    max_tokens: maxTokensByMode[preset] || 450,
+    temperature: tempByMode[preset] || 1.0,
     top_p: 0.97
   };
 
   try {
-    const resp = await postWithRetry(
-      DEEPSEEK_API_URL,
-      body,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.TOGETHER_AI_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 120000
+    const resp = await postWithRetry(DEEPSEEK_API_URL, body, {
+      headers: {
+        Authorization: `Bearer ${process.env.TOGETHER_AI_KEY}`,
+        'Content-Type': 'application/json'
       },
-      2
-    );
-    const text = resp?.data?.choices?.[0]?.message?.content || '';
+      timeout: 60000
+    });
+
+    const text = sanitizeText(resp?.data?.choices?.[0]?.message?.content || '');
     return {
       mentor,
       response: text,
@@ -281,11 +225,11 @@ async function getMentorResponse(mentor, userText, preset, options = {}) {
       timestamp: new Date().toISOString(),
       viralScore: scoreViral(text)
     };
-  } catch (e) {
+  } catch {
     const fallback = fallbackMentor(preset);
     return {
       mentor,
-      response: fallback,
+      response: sanitizeText(fallback),
       preset,
       timestamp: new Date().toISOString(),
       viralScore: 84,
@@ -294,16 +238,14 @@ async function getMentorResponse(mentor, userText, preset, options = {}) {
   }
 }
 
-/* ────────────────────────────────────────────────────────────
-   FALLBACKS (analysis + mentor)
-   ──────────────────────────────────────────────────────────── */
+/* =============== Fallbacks =============== */
 function fallbackScan(message) {
   const condensed = oneLine(String(message || '')).slice(0, 200);
   return {
     headline: 'You asked for a slot, not a story.',
     message: condensed,
-    analysis: 'It reads like a calendar request. No edge, no tension, no hosted frame.',
-    mistake: 'You ceded power by asking for availability. Attraction needs leadership.',
+    analysis: 'Reads like a calendar request. No tension, no hosted frame.',
+    mistake: 'You ceded power by asking for availability.',
     rewrite: 'Hidden speakeasy Thu 9. Wear something that gets us kicked out.',
     why: ['Specific plan, zero labor', 'You host, they join', 'Assumes value, invites choice'],
     principle: 'Invitation is not a question.',
@@ -323,29 +265,19 @@ function fallbackPattern(message) {
     headline: 'Frame leaked at tests — recover by hosting.',
     thread: snapshot,
     critical: [
-      {
-        moment: 'Their playful test',
-        what_went_wrong: 'You defended yourself, proving doubt and lowering tension.',
-        better_line: 'Good. I don’t want safe.',
-        why: 'Escalate danger instead of defending; keep Challenger frame.'
-      },
-      {
-        moment: 'Admin pivot',
-        what_went_wrong: 'You switched to logistics mid-flirt, collapsing vibe.',
-        better_line: 'Penalty for being trouble: you owe me a drink. Thu 8.',
-        why: 'Host logistics with playful dominance; restore frame.'
-      }
+      { moment: 'Their playful test', what_went_wrong: 'You defended; tension dropped.', better_line: 'Good. I don’t want safe.', why: 'Accept & amplify; keep Challenger.' },
+      { moment: 'Admin pivot', what_went_wrong: 'Logistics mid-flirt flattened vibe.', better_line: 'Penalty for being trouble: you owe me a drink. Thu 8.', why: 'Host logistics playfully; restore frame.' }
     ],
     psych_profile: {
       you: 'Jester seeking a crown — playful, then pleading.',
-      them: 'Amused decider — tests, withholds, enjoys pursuit.',
-      explain: 'This creates a tease-and-test loop. Defending rewards their withholding. Host the frame to break it.'
+      them: 'Amused decider — tests and withholds.',
+      explain: 'Tease-and-test loop. Defending rewards withholding. Host the frame to break it.'
     },
-    frame_ledger: { start: 'Challenger', mid: 'Clerk', end: 'Petitioner', explain: 'You opened strong, then surrendered logistics. That transferred status.' },
-    error_chain: { arc: 'Defense → Admin → Power transfer', explain: 'Defending proves doubt; admin kills spark; power moves to them.' },
+    frame_ledger: { start: 'Challenger', mid: 'Clerk', end: 'Petitioner', explain: 'Strong open → admin pivot → status transfer.' },
+    error_chain: { arc: 'Defense → Admin → Power transfer', explain: 'Defending proves doubt; admin kills spark.' },
     fixes: [
-      { situation: 'Tests', rewrite: 'Good. I prefer trouble undefeated.', explain: 'Accept and amplify—no defense, more tension.' },
-      { situation: 'Logistics', rewrite: 'Speakeasy tomorrow. One seat left.', explain: 'Scarcity + hosting flips the frame.' }
+      { situation: 'Tests', rewrite: 'Good. I prefer trouble undefeated.', explain: 'No defense; escalate tension.' },
+      { situation: 'Logistics', rewrite: 'Speakeasy tomorrow. One seat left.', explain: 'Scarcity + hosting flips frame.' }
     ],
     recovery: ['Silence 2–3 days', 'Return with hosted plan', 'Binary close'],
     principle: 'Begin Challenger, end Victor.',
@@ -357,7 +289,7 @@ function fallbackPattern(message) {
 function fallbackMentor(preset) {
   if (preset === 'drill') {
     return [
-      '1) What outcome would prove you irresistible today?',
+      '1) What outcome proves you irresistible today?',
       '2) Where are you asking permission?',
       '3) What myth are you offering?',
       '4) What time, what place, your lead?',
@@ -374,124 +306,70 @@ function fallbackMentor(preset) {
       'Law: Invitation is not a question.'
     ].join('\n');
   }
-  return `Here’s the uncomfortable truth: you talk like permission, not gravity. Speak like an experience—set the myth, host the plan, close cleanly.
-
-Law: Lead the frame or lose it.`;
+  return `Here’s the truth: you talk like permission, not gravity. Speak like an experience—set the myth, host the plan, close cleanly.\n\nLaw: Lead the frame or lose it.`;
 }
 
-/* ────────────────────────────────────────────────────────────
-   NORMALIZATION → WhisperfireResponse (for analyze)
-   ──────────────────────────────────────────────────────────── */
+/* =============== Normalization =============== */
 function normalizeToWhisperfire(ai, ctx) {
   const { input, tab, tone } = ctx;
 
   if (tab === 'scan') {
     const receipts = buildReceiptsFromScan(ai, input);
-    const powerPlay =
-      (Array.isArray(ai?.why) ? ai.why : []).slice(0, 3).join('\n') ||
-      'Specific plan, zero labor\nYou host, they join\nAssumes value, invites choice';
-    const nextMoves =
-      (Array.isArray(ai?.next) ? ai.next : [])
-        .map((s) => s?.trim())
-        .filter(Boolean)
-        .join('\n') || 'Offer a vivid plan.\nHost the logistics.\nClose cleanly.';
+    const powerPlay = (Array.isArray(ai?.why) ? ai.why : []).slice(0, 3).join('\n')
+      || 'Specific plan, zero labor\nYou host, they join\nAssumes value, invites choice';
+    const nextMoves = (Array.isArray(ai?.next) ? ai.next : []).map(s => s?.trim()).filter(Boolean).join('\n')
+      || 'Offer a vivid plan.\nHost the logistics.\nClose cleanly.';
     const coreTake = joinSentences([ai?.analysis, ai?.mistake]);
 
     const tactic = inferTacticFromText(coreTake || '', ai?.headline || '');
     const metrics = deriveMetricsFromText(coreTake || '', ai?.headline || '', input);
 
     return {
-      context: {
-        tab,
-        relationship: 'Partner',
-        tone: tone || 'soft',
-        content_type: 'dm',
-        subject_name: null
-      },
+      context: { tab, relationship: 'Partner', tone: tone || 'soft', content_type: 'dm', subject_name: null },
       headline: String(ai?.headline || 'Lead with a story, not a request.'),
       core_take: coreTake || 'You ceded frame; rewrite restores tension and leadership.',
       tactic,
-      motives: ai?.principle
-        ? String(ai.principle)
-        : 'Signal value; avoid approval-seeking; lead decisively.',
+      motives: ai?.principle ? String(ai.principle) : 'Signal value; avoid approval-seeking; lead decisively.',
       targeting: inferTargetingFromText(coreTake || '') || 'You played the Petitioner; become the Curator.',
       power_play: powerPlay,
       receipts,
       next_moves: nextMoves,
-      suggested_reply: {
-        style: tone || 'soft',
-        text: oneLine(String(ai?.rewrite || 'Hidden speakeasy Thu 9. Bring your curiosity.'))
-      },
-      safety: {
-        risk_level: metrics.red_flag >= 60 ? 'MODERATE' : 'LOW',
-        notes: metrics.red_flag >= 60 ? 'Reduce neediness; host the frame.' : 'Safe if you lead cleanly.'
-      },
-      metrics: {
-        red_flag: metrics.red_flag,
-        certainty: metrics.certainty,
-        viral_potential: metrics.viral_potential
-      },
+      suggested_reply: { style: tone || 'soft', text: oneLine(String(ai?.rewrite || 'Hidden speakeasy Thu 9. Bring your curiosity.')) },
+      safety: { risk_level: metrics.red_flag >= 60 ? 'MODERATE' : 'LOW', notes: metrics.red_flag >= 60 ? 'Reduce neediness; host the frame.' : 'Safe if you lead cleanly.' },
+      metrics: { red_flag: metrics.red_flag, certainty: metrics.certainty, viral_potential: metrics.viral_potential },
       pattern: { cycle: null, prognosis: null },
       ambiguity: { warning: null, missing_evidence: null },
-      hidden_agenda: null,
-      archetypes: null,
-      trigger_pattern_map: null,
-      contradictions: null,
-      weapons: null,
-      forecast: null,
-      counter_intervention: String(ai?.principle || 'Invitation is not a question.'),
-      long_game: null
+      hidden_agenda: null, archetypes: null, trigger_pattern_map: null, contradictions: null, weapons: null, forecast: null,
+      counter_intervention: String(ai?.principle || 'Invitation is not a question.'), long_game: null
     };
   }
 
-  // PATTERN
+  // pattern
   const receipts = buildReceiptsFromPattern(ai, input);
-  const coreTake = joinSentences([
-    ai?.psych_profile?.explain,
-    ai?.frame_ledger?.explain,
-    ai?.error_chain?.explain
-  ]);
-
+  const coreTake = joinSentences([ai?.psych_profile?.explain, ai?.frame_ledger?.explain, ai?.error_chain?.explain]);
   const metrics = deriveMetricsFromText(coreTake || '', ai?.headline || '', input);
 
   const whyBullets = [];
-  (Array.isArray(ai?.fixes) ? ai.fixes : [])
-    .slice(0, 3)
-    .forEach((fx) => {
-      if (fx?.explain) whyBullets.push(oneLine(fx.explain).slice(0, 80));
-    });
-  if (whyBullets.length < 3 && ai?.principle) {
-    whyBullets.push(oneLine(ai.principle));
-  }
+  (Array.isArray(ai?.fixes) ? ai.fixes : []).slice(0, 3).forEach(fx => {
+    if (fx?.explain) whyBullets.push(oneLine(fx.explain).slice(0, 80));
+  });
+  if (whyBullets.length < 3 && ai?.principle) whyBullets.push(oneLine(ai.principle));
   while (whyBullets.length < 3) whyBullets.push('Host logistics; never beg');
 
-  const nextMoves =
-    (Array.isArray(ai?.recovery) ? ai.recovery : [])
-      .map((s) => s?.trim())
-      .filter(Boolean)
-      .join('\n') || 'Silence 2–3 days.\nReturn with hosted plan.\nBinary close.';
+  const nextMoves = (Array.isArray(ai?.recovery) ? ai.recovery : []).map(s => s?.trim()).filter(Boolean).join('\n')
+    || 'Silence 2–3 days.\nReturn with hosted plan.\nBinary close.';
 
-  const frameArc =
-    ai?.frame_ledger?.start && ai?.frame_ledger?.mid && ai?.frame_ledger?.end
-      ? `${ai.frame_ledger.start} → ${ai.frame_ledger.mid} → ${ai.frame_ledger.end}`
-      : null;
+  let frameArc = null;
+  if (ai?.frame_ledger?.start && ai?.frame_ledger?.mid && ai?.frame_ledger?.end) {
+    frameArc = `${ai.frame_ledger.start} → ${ai.frame_ledger.mid} → ${ai.frame_ledger.end}`;
+  }
 
   return {
-    context: {
-      tab: 'pattern',
-      relationship: 'Partner',
-      tone: tone || 'soft',
-      content_type: 'dm',
-      subject_name: null
-    },
+    context: { tab: 'pattern', relationship: 'Partner', tone: tone || 'soft', content_type: 'dm', subject_name: null },
     headline: String(ai?.headline || 'Frame leaked at tests — recover by hosting.'),
-    core_take:
-      coreTake ||
-      'They probed; you defended; logistics flattened tension. Fix with decisive hosting and playful escalation.',
+    core_take: coreTake || 'They probed; you defended; logistics flattened tension. Fix with decisive hosting and playful escalation.',
     tactic: { label: 'Dominant Dynamic', confidence: 90 },
-    motives: ai?.principle
-      ? String(ai.principle)
-      : 'Keep tension through tests; set logistics after escalation.',
+    motives: ai?.principle ? String(ai.principle) : 'Keep tension through tests; set logistics after escalation.',
     targeting: 'You became the Clerk; reassert the Curator.',
     power_play: whyBullets.slice(0, 3).join('\n'),
     receipts,
@@ -500,42 +378,23 @@ function normalizeToWhisperfire(ai, ctx) {
       style: tone || 'soft',
       text: String(ai?.boundary_script || 'Victory drink tomorrow. One seat left.\nText “approved” if you’re in.')
     },
-    safety: {
-      risk_level: metrics.red_flag >= 60 ? 'MODERATE' : 'LOW',
-      notes: 'Recover by setting a vivid plan and closing cleanly.'
-    },
-    metrics: {
-      red_flag: metrics.red_flag,
-      certainty: metrics.certainty,
-      viral_potential: metrics.viral_potential
-    },
-    pattern: {
-      cycle: frameArc ? `Frame arc: ${frameArc}` : (ai?.error_chain?.arc || null),
-      prognosis: ai?.error_chain?.arc || 'Defense → Admin → Power transfer'
-    },
+    safety: { risk_level: metrics.red_flag >= 60 ? 'MODERATE' : 'LOW', notes: 'Recover by setting a vivid plan and closing cleanly.' },
+    metrics: { red_flag: metrics.red_flag, certainty: metrics.certainty, viral_potential: metrics.viral_potential },
+    pattern: { cycle: frameArc ? `Frame arc: ${frameArc}` : (ai?.error_chain?.arc || null), prognosis: ai?.error_chain?.arc || 'Defense → Admin → Power transfer' },
     ambiguity: { warning: null, missing_evidence: null },
     hidden_agenda: ai?.hidden_agenda ?? null,
-    archetypes: null,
-    trigger_pattern_map: null,
-    contradictions: null,
-    weapons: null,
-    forecast: null,
+    archetypes: null, trigger_pattern_map: null, contradictions: null, weapons: null, forecast: null,
     counter_intervention: String(ai?.principle || 'Begin Challenger, end Victor.'),
     long_game: null
   };
 }
 
-/* ────────────────────────────────────────────────────────────
-   HELPERS
-   ──────────────────────────────────────────────────────────── */
+/* =============== Helpers =============== */
 function buildReceiptsFromScan(ai, input) {
   const out = [];
   if (ai?.message) out.push(oneLine(String(ai.message)).slice(0, 220));
   else {
-    const lines = String(input || '')
-      .split('\n')
-      .map((s) => oneLine(s))
-      .filter(Boolean);
+    const lines = String(input || '').split('\n').map(s => oneLine(s)).filter(Boolean);
     if (lines.length) out.push(lines[0].slice(0, 220));
     if (lines[1]) out.push(lines[1].slice(0, 220));
   }
@@ -546,19 +405,15 @@ function buildReceiptsFromPattern(ai, input) {
   const bullets = [];
   const items = Array.isArray(ai?.thread) ? ai.thread : [];
   if (items.length) {
-    items.slice(0, 6).forEach((t) => {
+    items.slice(0, 6).forEach(t => {
       const who = (t?.who || '').trim() || 'You';
       const said = oneLine(String(t?.said || '')).slice(0, 90);
       const meaning = oneLine(String(t?.meaning || '')).slice(0, 60);
       bullets.push(`${who}: “${said}” — ${meaning}`);
     });
   } else {
-    const lines = String(input || '')
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .slice(0, 6);
-    lines.forEach((l) => {
+    const lines = String(input || '').split('\n').map(s => s.trim()).filter(Boolean).slice(0, 6);
+    lines.forEach(l => {
       const who = /^them:/i.test(l) ? 'Them' : 'You';
       const said = l.replace(/^you:|^them:/i, '').trim();
       bullets.push(`${who}: “${oneLine(said).slice(0, 90)}” — ${who === 'Them' ? 'test/withhold' : 'defense/admin'}`);
@@ -586,7 +441,7 @@ function inferTargetingFromText(text) {
 function deriveMetricsFromText(core, head, input) {
   const vibe = estimateVibe(input);
   const red = clampInt(100 - vibe * 10, 0, 100);
-  return { red_flag: red, certainty: 86, viral_potential: 76 };
+  return { red_flag: red, certainty: 85, viral_potential: 70 };
 }
 
 function estimateVibe(text) {
@@ -602,33 +457,9 @@ function estimateVibe(text) {
   return Math.max(0, Math.min(10, v));
 }
 
-function oneLine(s) {
-  return String(s || '').replace(/\s+/g, ' ').trim();
-}
+function oneLine(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
+function joinSentences(parts) { return (parts || []).map(p => String(p || '').trim()).filter(Boolean).join(' '); }
+function clampInt(n, min, max) { const x = Number.parseInt(Number(n || 0), 10); if (Number.isNaN(x)) return min; return Math.max(min, Math.min(max, x)); }
+function scoreViral(t) { let s = 50; if (/law:|principle/i.test(t)) s += 10; if (/secret|forbidden|never/i.test(t)) s += 15; if (t.length > 200) s += 10; if (/\?$/.test(t.trim())) s += 5; return Math.min(100, s); }
 
-function joinSentences(parts) {
-  return (parts || []).map((p) => String(p || '').trim()).filter(Boolean).join(' ');
-}
-
-function clampInt(n, min, max) {
-  const x = Number.parseInt(Number(n || 0), 10);
-  if (Number.isNaN(x)) return min;
-  return Math.max(min, Math.min(max, x));
-}
-
-function scoreViral(t) {
-  let s = 50;
-  if (/law:|principle/i.test(t)) s += 10;
-  if (/secret|forbidden|never/i.test(t)) s += 15;
-  if (t.length > 200) s += 10;
-  if (/\?$/.test(t.trim())) s += 5;
-  return Math.min(100, s);
-}
-
-/* ────────────────────────────────────────────────────────────
-   EXPORTS
-   ──────────────────────────────────────────────────────────── */
-module.exports = {
-  analyzeWithAI,
-  getMentorResponse
-};
+module.exports = { analyzeWithAI, getMentorResponse };
