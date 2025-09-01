@@ -5,17 +5,13 @@ const router = express.Router();
 const analysisController = require('../controllers/analysisController');
 const mentorController = require('../controllers/mentorController');
 
-/**
- * UNIFIED ANALYZE ROUTE – primary entry the app should call
- * (keep your existing analysisController implementation)
- */
+// Analyze
 router.post('/analyze', analysisController.unifiedAnalyze);
-
-// Back-compat separate routes (if the app still hits these)
 router.post('/analyze/scan', analysisController.analyzeScan);
 router.post('/analyze/pattern', analysisController.analyzePattern);
 
-// Mentor SSE route (FIXED: call mentorController.mentorsChat)
-router.post('/mentor', mentorController.mentorsChat);
+// Mentor (JSON fallback that always replies)
+router.get('/mentor/health', mentorController.mentorHealth);
+router.post('/mentor/json', mentorController.mentorJSON);
 
 module.exports = router;
