@@ -5,14 +5,14 @@ const router = express.Router();
 const analysisController = require('../controllers/analysisController');
 const mentorController = require('../controllers/mentorController');
 
-// Analyze
+// UNIFIED (client passes { tab: 'scan' | 'pattern' })
 router.post('/analyze', analysisController.unifiedAnalyze);
+
+// explicit routes if you still use them
 router.post('/analyze/scan', analysisController.analyzeScan);
 router.post('/analyze/pattern', analysisController.analyzePattern);
 
-// Mentor (JSON only for reliability)
-router.get('/mentor/health', mentorController.mentorHealth);
-router.post('/mentor/json', mentorController.mentorJSON);
-router.post('/mentor/echo', mentorController.mentorEcho);
+// Mentor SSE route
+router.post('/mentor', mentorController.mentorsChat);
 
 module.exports = router;
