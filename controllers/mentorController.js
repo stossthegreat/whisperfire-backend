@@ -1,25 +1,34 @@
 // controllers/mentorController.js
 const { getMentorResponse } = require('../services/aiService');
 
+function badRequest(res, msg, received = {}) {
+  return res.status(400).json({ error: msg, received });
+}
+
 exports.mentorHealth = (_req, res) => {
-  res.json({ ok: true, route: '/mentor/json', ts: new Date().toISOString() });
+  res.json({
+    ok: true,
+    route: '/api/v1/mentor/json',
+    hasKey: !!process.env.TOGETHER_AI_KEY,
+    ts: new Date().toISOString(),
+  });
 };
 
-// Simple JSON endpoint (reliable, no streaming)
+// JSON (no streaming) — reliable and easy to debug
 exports.mentorJSON = async (req, res) => {
   try {
     const { mentor, user_text, userText, preset, options } = req.body || {};
     const text = user_text || userText;
 
     if (!mentor || !text || !preset) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        required: ['mentor', 'user_text|userText', 'preset'],
-        received: { mentor: !!mentor, user_text: !!text, preset: !!preset }
+      return badRequest(res, 'Missing required fields: mentor, user_text|userText, preset', {
+        mentor: !!mentor, user_text: !!text, preset: !!preset
       });
     }
 
+    // Call AI; aiService will NEVER throw — it returns a fallback if anything goes wrong.
     const result = await getMentorResponse(mentor, text, preset, options);
+
     return res.json({
       success: true,
       data: {
@@ -32,7 +41,12 @@ exports.mentorJSON = async (req, res) => {
       }
     });
   } catch (e) {
-    console.error('mentorJSON error:', e?.response?.data || e?.message);
-    return res.status(500).json({ error: 'mentor_json_failed' });
+    console.error('mentorJSON hard error:', e?.response?.data || e?.message || e);
+    return res.status(500).json({ error: 'mentor_json_failed', msg: String(e?.message || e) });
   }
+};
+
+// Small echo to verify the app is posting the right shape
+exports.mentorEcho = (req, res) => {
+  res.json({ ok: true, body: req.body });
 };
