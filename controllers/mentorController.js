@@ -1,52 +1,36 @@
 // controllers/mentorController.js
-const { getMentorResponse } = require('../services/aiService');
+const { getMentorResponse, toCleanText } = require('../services/aiService');
 
-function badRequest(res, msg, received = {}) {
-  return res.status(400).json({ error: msg, received });
-}
-
-exports.mentorHealth = (_req, res) => {
-  res.json({
-    ok: true,
-    route: '/api/v1/mentor/json',
-    hasKey: !!process.env.TOGETHER_AI_KEY,
-    ts: new Date().toISOString(),
-  });
-};
-
-// JSON (no streaming) — reliable and easy to debug
-exports.mentorJSON = async (req, res) => {
+exports.mentorsChat = async (req, res) => {
   try {
-    const { mentor, user_text, userText, preset, options } = req.body || {};
-    const text = user_text || userText;
+    const { mentor, user_text, userText, preset } = req.body || {};
+    const actualUserText = user_text || userText;
 
-    if (!mentor || !text || !preset) {
-      return badRequest(res, 'Missing required fields: mentor, user_text|userText, preset', {
-        mentor: !!mentor, user_text: !!text, preset: !!preset
+    if (!mentor || !actualUserText || !preset) {
+      return res.status(400).json({
+        error: 'Missing required fields: mentor, user_text/userText, preset'
       });
     }
 
-    // Call AI; aiService will NEVER throw — it returns a fallback if anything goes wrong.
-    const result = await getMentorResponse(mentor, text, preset, options);
+    // SSE headers with UTF-8
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
 
-    return res.json({
-      success: true,
-      data: {
-        mentor,
-        preset,
-        response: result.response,
-        viral_score: result.viralScore || 85,
-        timestamp: result.timestamp,
-        fallback: !!result.fallback
-      }
-    });
+    const { response } = await getMentorResponse(mentor, actualUserText, preset);
+    const clean = toCleanText(response);
+
+    res.write(`data: ${JSON.stringify({ text: clean, mentor, preset })}\n\n`);
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.end();
   } catch (e) {
-    console.error('mentorJSON hard error:', e?.response?.data || e?.message || e);
-    return res.status(500).json({ error: 'mentor_json_failed', msg: String(e?.message || e) });
+    console.error('mentorsChat error:', e.message);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: 'Mentor response failed' });
+    }
+    res.write(`data: ${JSON.stringify({ error: 'Mentor response failed' })}\n\n`);
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.end();
   }
-};
-
-// Small echo to verify the app is posting the right shape
-exports.mentorEcho = (req, res) => {
-  res.json({ ok: true, body: req.body });
 };
