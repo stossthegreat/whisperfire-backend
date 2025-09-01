@@ -1,69 +1,38 @@
 // controllers/mentorController.js
-const { generateMentorResponse } = require('../utils/mentorResponse');
-const { sanitizeForSSE } = require('../utils/textSanitizer');
+const { getMentorResponse } = require('../services/aiService');
 
-exports.mentorsChat = (req, res) => {
+exports.mentorHealth = (_req, res) => {
+  res.json({ ok: true, route: '/mentor/json', ts: new Date().toISOString() });
+};
+
+// Simple JSON endpoint (reliable, no streaming)
+exports.mentorJSON = async (req, res) => {
   try {
     const { mentor, user_text, userText, preset, options } = req.body || {};
-    const actualUserText = user_text || userText;
+    const text = user_text || userText;
 
-    if (!mentor || !actualUserText || !preset) {
+    if (!mentor || !text || !preset) {
       return res.status(400).json({
-        error: 'Missing required fields: mentor, user_text, and preset are required',
-        received: { mentor, user_text: actualUserText, preset }
+        error: 'Missing required fields',
+        required: ['mentor', 'user_text|userText', 'preset'],
+        received: { mentor: !!mentor, user_text: !!text, preset: !!preset }
       });
     }
 
-    // Strict SSE headers (UTF-8 + no-transform to stop proxies from mangling)
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no'); // Nginx: disable buffering
-
-    // Keep-alive ping every 15s to avoid timeouts on some hosts
-    const keepAlive = setInterval(() => {
-      if (!res.writableEnded) res.write(`: ping\n\n`);
-    }, 15000);
-
-    const stream = generateMentorResponse(mentor, actualUserText, preset, options);
-
-    stream.on('data', (chunk) => {
-      try {
-        const raw = typeof chunk === 'string' ? chunk : (chunk?.text || '');
-        const clean = sanitizeForSSE(raw);
-        const payload = {
-          ...chunk,
-          text: clean
-        };
-        res.write(`data: ${JSON.stringify(payload)}\n\n`);
-      } catch (e) {
-        res.write(`data: ${JSON.stringify({ error: 'sanitize_failed' })}\n\n`);
+    const result = await getMentorResponse(mentor, text, preset, options);
+    return res.json({
+      success: true,
+      data: {
+        mentor,
+        preset,
+        response: result.response,
+        viral_score: result.viralScore || 85,
+        timestamp: result.timestamp,
+        fallback: !!result.fallback
       }
     });
-
-    stream.on('end', () => {
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-      clearInterval(keepAlive);
-      res.end();
-    });
-
-    stream.on('error', (err) => {
-      clearInterval(keepAlive);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Stream error occurred', details: err?.message });
-      } else {
-        res.write(`data: ${JSON.stringify({ error: 'Stream error occurred' })}\n\n`);
-        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-        res.end();
-      }
-    });
-  } catch (error) {
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to generate mentor response', details: error?.message });
-    } else {
-      res.write(`data: ${JSON.stringify({ error: 'Failed to generate response' })}\n\n`);
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-      res.end();
-    }
+  } catch (e) {
+    console.error('mentorJSON error:', e?.response?.data || e?.message);
+    return res.status(500).json({ error: 'mentor_json_failed' });
   }
 };
