@@ -3,12 +3,6 @@
 
 const { sanitizeText } = require('./textSanitizer');
 
-function clampLen(s, max = 3000) {
-  s = String(s || '');
-  return s.length > max ? s.slice(0, max) : s;
-}
-
-// join sentence lines into short paragraphs, preserve bullet lines
 function smartParagraphs(s) {
   const lines = s.split('\n').filter(x => x.trim() !== '');
   const out = [];
@@ -16,9 +10,9 @@ function smartParagraphs(s) {
   const flush = () => { if (bucket.length) { out.push(bucket.join(' ')); bucket = []; } };
 
   for (const line of lines) {
-    if (/^•\s/.test(line)) { flush(); out.push(line); continue; }
+    if (/^•\s/.test(line)) { flush(); out.push(line.trim()); continue; }
     bucket.push(line.trim());
-    if (/[.!?…]"?$/.test(line.trim())) flush(); // end paragraph on sentence end
+    if (/[.!?…]"?$/.test(line.trim())) flush();
   }
   flush();
   return out.join('\n\n').replace(/\n{3,}/g, '\n\n');
@@ -33,13 +27,8 @@ function formatAdvise(text) {
     const trio = sentences.slice(0, 3).map(s => `• ${s}`);
     t = (trio.join('\n') + '\n\n' + t).trim();
   }
-  if (!/(^|\n)Line:\s*["“]/i.test(t)) {
-    const quoted = t.match(/"([^"]{3,140})"/)?.[0] || '"Hidden speakeasy Thu 9. Bring your curiosity."';
-    t += `\n\nLine: ${quoted}`;
-  }
-  if (!/(^|\n)Principle:\s*/i.test(t)) {
-    t += `\nPrinciple: Invitation is not a question.`;
-  }
+  if (!/(^|\n)Line:\s*["“]/i.test(t)) t += `\n\nLine: "Hidden speakeasy Thu 9. Bring your curiosity."`;
+  if (!/(^|\n)Principle:\s*/i.test(t)) t += `\nPrinciple: Invitation is not a question.`;
   return sanitizeText(smartParagraphs(t));
 }
 
@@ -65,29 +54,25 @@ function formatDrill(text) {
       '12) What binary close ends dithering?'
     ];
   }
-  let tail = '';
-  if (!rows.some(r => /^COMMAND:/i.test(r))) tail += '\n\nCOMMAND: Write and send the line in 5 minutes.';
-  if (!rows.some(r => /^Law:/i.test(r))) tail += '\nLaw: Invitation is not a question.';
-  return sanitizeText(out.join('\n') + tail);
+  if (!rows.some(r => /^COMMAND:/i.test(r))) out.push('', 'COMMAND: Write and send the line in 5 minutes.');
+  if (!rows.some(r => /^Law:/i.test(r))) out.push('Law: Invitation is not a question.');
+  return sanitizeText(out.join('\n'));
 }
 
 function formatRoleplay(text) {
   let t = sanitizeText(text);
-  if (!/(^|\n)Use:\s*"/i.test(t)) {
-    t += `\n\nUse: "Victory drink tomorrow. One seat left."`;
-  }
+  if (!/(^|\n)Use:\s*"/i.test(t)) t += `\n\nUse: "Victory drink tomorrow. One seat left."`;
   return sanitizeText(smartParagraphs(t));
 }
 
 function formatChat(text) {
   let t = sanitizeText(text);
-  if (!/\?\s*$/m.test(t)) t += `\n\nSo, what do you want to risk this week?`;
   if (!/“.+”|".+"/.test(t)) t += `\n"Invitation is not a question."`;
+  if (!/\?\s*$/m.test(t)) t += `\n\nSo, what do you want to risk this week?`;
   return sanitizeText(smartParagraphs(t));
 }
 
 function formatByPreset(text, preset) {
-  text = clampLen(text);
   switch (preset) {
     case 'advise':   return formatAdvise(text);
     case 'drill':    return formatDrill(text);
