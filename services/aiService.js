@@ -1,27 +1,28 @@
-// services/aiService.js — ORACLE SEDUCER v3.5 (Together AI restored + cleaned)
-// - Back to your v3 prompt structure/voice (no shape changes for controllers)
-// - Ultra-clean output: fixes Â/â€™/smart quotes, adds paragraphs, strips stray markdown
-// - Longer, richer answers (Scan/Pattern + Mentor presets), copy-ready lines
-// - Robust HTTP (keep-alive, retries, long timeouts)
-// - Safe JSON parsing with strong fallbacks
-// - Normalization unchanged so controllers render fine
+// services/aiService.js — ORACLE SEDUCER v8 (Together AI, stabilized)
+// - Big, structured outputs (Scan/Pattern + Mentors) with real paragraphs
+// - Ultra-clean text (kills Â / smart-quote mojibake, strips stray markdown)
+// - Robust HTTP (keep-alive agents, retries, long timeouts)
+// - Safe JSON extraction + normalization to your Whisperfire shape
+// - Personas tuned for dense, practical advice (ethical, adult, consensual)
 
 const axios = require('axios');
 const http = require('http');
 const https = require('https');
 
+/* ────────────────────────────────────────────────────────────
+   CONFIG
+   ──────────────────────────────────────────────────────────── */
 const DEEPSEEK_API_URL = 'https://api.together.xyz/v1/chat/completions';
 const MODEL = 'deepseek-ai/DeepSeek-V3';
 
-/* ────────────────────────────────────────────────────────────
-   Keep-alive HTTP agents (stability + fewer socket resets)
-   ──────────────────────────────────────────────────────────── */
+// Keep-alive to reduce socket churn on long calls
 const keepAliveHttp = new http.Agent({ keepAlive: true, maxSockets: 64 });
 const keepAliveHttps = new https.Agent({ keepAlive: true, maxSockets: 64 });
 
 /* ────────────────────────────────────────────────────────────
-   TEXT CLEANERS — kill mojibake, normalize quotes, add spacing
+   TEXT CLEANERS — kill mojibake, add spacing, strip markdown
    ──────────────────────────────────────────────────────────── */
+
 function fixSmartQuotes(s = '') {
   return String(s)
     .replace(/Â+/g, '')                             // stray Â
@@ -31,45 +32,38 @@ function fixSmartQuotes(s = '') {
     .replace(/â€�|Ã¢â‚¬Â|â\u0080\u009D/g, '"')    // right double
     .replace(/â€”|Ã¢â‚¬â¢|â\u0080\u0094/g, '—')  // em dash
     .replace(/â€“|Ã¢â‚¬â€œ|â\u0080\u0093/g, '–')   // en dash
-    .replace(/\u00A0/g, ' ');                      // NBSP -> space
+    .replace(/\u00A0/g, ' ');                      // NBSP → space
 }
 
-function stripMarkdownNasties(s = '') {
+function stripWeirdMarkdown(s = '') {
   return String(s)
-    .replace(/^[\*\u2022\-]{1,2}\s*/gm, '') // leading bullets
-    .replace(/[>`_#]/g, '');                // stray md tokens
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')         // zero-width junk
+    .replace(/^[\*\u2022\-]{1,2}\s*/gm, '')        // leading bullets/asterisks
+    .replace(/[>`_#]/g, '');                       // stray markdown tokens
 }
 
+// Enforce readable paragraphs from plain text
 function paragraphize(s = '') {
-  let t = String(s);
-  // Ensure a space after sentence-ending punctuation when next char is Capital/quote.
+  let t = fixSmartQuotes(stripWeirdMarkdown(String(s)));
+
+  // Fix glued punctuation like "...end.Next"
   t = t.replace(/([a-z0-9])([.!?])([A-Z"'])/g, '$1$2 $3');
-  // Encourage paragraphs after sentence stops.
+
+  // Start common labels on new paragraphs
+  t = t.replace(/\s*(?=(?:Headline:|Analysis:|Mistake:|Rewrite:|Why:|Principle:|Next|Diagnosis:|Psychology:|Plays|Lines:|Close:|Boundary|Recovery|Law:|Use:))/g, '\n\n');
+
+  // Encourage paragraph breaks after sentence stops
   t = t.replace(/([.!?])\s+(?=[A-Z0-9"'\(])/g, '$1\n\n');
-  // Break around labels that should start blocks.
-  t = t.replace(/\s*(?=(?:Diagnosis:|Psychology:|Plays|Lines:|Close:|Principle:|Principles:|Law:|Use:|Line:|Recovery|Boundary))/g, '\n\n');
-  // Collapse overspacing.
-  t = t.replace(/\n{3,}/g, '\n\n');
-  return t;
-}
 
-function normalizeSpacing(s = '') {
-  return String(s)
-    .replace(/\r/g, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-function cleanText(s = '') {
-  return normalizeSpacing(paragraphize(stripMarkdownNasties(fixSmartQuotes(s))));
+  // Normalize whitespace
+  t = t.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+  return t.trim();
 }
 
 // Deep-clean any object/array/string tree
 function deepClean(entity) {
   if (entity == null) return entity;
-  if (typeof entity === 'string') return cleanText(entity);
+  if (typeof entity === 'string') return paragraphize(entity);
   if (Array.isArray(entity)) return entity.map(deepClean);
   if (typeof entity === 'object') {
     const out = {};
@@ -80,7 +74,7 @@ function deepClean(entity) {
 }
 
 /* ────────────────────────────────────────────────────────────
-   HTTP RETRY (429/5xx) with exponential backoff
+   HTTP RETRY HELPER
    ──────────────────────────────────────────────────────────── */
 async function postWithRetry(url, data, config, retries = 2) {
   let attempt = 0, lastErr;
@@ -94,8 +88,8 @@ async function postWithRetry(url, data, config, retries = 2) {
     } catch (e) {
       lastErr = e;
       const status = e?.response?.status;
-      if (!(status === 429 || (status >= 500 && status <= 599))) break;
-      const wait = Math.min(2000 * Math.pow(2, attempt), 9000);
+      if (!(status === 429 || (status >= 500 && status <= 599))) break; // retry only 429/5xx
+      const wait = Math.min(2000 * Math.pow(2, attempt), 8000);
       await new Promise(r => setTimeout(r, wait));
       attempt++;
     }
@@ -104,86 +98,88 @@ async function postWithRetry(url, data, config, retries = 2) {
 }
 
 /* ────────────────────────────────────────────────────────────
-   PROMPT BUILDERS — match your v3 shape, just richer/longer
+   ANALYZE PROMPTS — SCAN / PATTERN (long, structured)
    ──────────────────────────────────────────────────────────── */
+
 function buildScanPrompt(tone, multi) {
   return `
-ROLE: You are the world's sharpest seduction mentor (Casanova × Cleopatra × Sun Tzu).
-You do not label—you coach with surgical clarity. You rebuild the user's line and give laws to carry forward.
+ROLE: Elite seduction strategist. You decode the USER's line(s), expose the real mistake,
+and rebuild a line that pulls, not pleads. Ethical, adult, consensual.
 
-TONE=${tone}  (savage = blade-precise truth, soft = velvet steel, clinical = forensic cool)
+TONE=${tone}  // savage=blade-precise; soft=velvet-steel; clinical=forensic-cool
 
-TASK: Analyze ${multi ? 'a small set of messages (mostly from the user)' : 'one message'} and produce a lethal, plain-English coaching output.
-Speak to the sender (the user). Longer, deeper answers beat short ones.
-
-OUTPUT JSON ONLY, with EXACT keys and shapes:
+FORMAT (NO MARKDOWN, NO EMOJIS):
+Return JSON only with these exact keys:
 {
   "headline": "One-line verdict that stings but teaches.",
-  "message": "The exact user message(s) you evaluated (concise; if multiple, compress to 1–3 short lines).",
-  "analysis": "What actually happened in plain English (6–9 sentences).",
-  "mistake": "The core error (3–5 sentences).",
-  "rewrite": "One elite replacement line (or two short options).",
-  "why": ["Reason 1 (5–10 words)", "Reason 2 (5–10 words)", "Reason 3 (5–10 words)"],
-  "principle": "One sentence law they must remember.",
+  "message": "Short quote of the user's line(s).",
+  "analysis": "6–10 sentences of plain-English decoding with paragraph breaks.",
+  "mistake": "2–4 sentences naming the core error and why it kills tension.",
+  "rewrite": "One elite replacement line (or two short options) the USER can copy.",
+  "why": ["Reason 1 (<=10 words)", "Reason 2 (<=10 words)", "Reason 3 (<=10 words)"],
+  "principle": "One-sentence law to keep.",
   "next": ["Command 1", "Command 2", "Command 3"]
 }
 
 RULES:
-- Address the USER (the sender). Never advise the other person.
-- Make the rewrite decisive, specific, charismatic (no admin energy).
-- 'why' MUST be exactly three short bullets.
-- Prefer 220–360 words overall. Rich, not bloated.
-- Return ONLY the JSON object. No prose, no preface.`;
+- No therapy-speak. No hedging. No apologies. No moralizing.
+- Rewrite must be specific, charismatic, and hosted (no admin energy).
+- Exactly three bullets in 'why'.
+- Use blank lines *inside* string values to create paragraphs.
+- 260–420 words total (rich, not bloated).
+- Adults only. Consent presumed. Nothing illegal/abusive.
+
+TASK: Analyze ${multi ? 'a short list of messages (mostly from the USER)' : 'one message from the USER'} and speak directly to the USER.`;
 }
 
 function buildPatternPrompt(tone) {
   return `
-ROLE: You are the war-room strategist of seduction. You don’t repeat transcripts; you decode moves.
+ROLE: War-room strategist of seduction. Decode moves, tests, and frame transfers. Ethical, adult, consensual.
 
 TONE=${tone}
 
-TASK: Analyze a multi-message thread between You and Them. Show what happened, where the frame flipped, and exactly what to say next. Give deep, plain-English explanations.
-
-OUTPUT JSON ONLY, with EXACT keys and shapes:
+FORMAT (NO MARKDOWN, NO EMOJIS):
+Return JSON only with these exact keys:
 {
-  "headline": "One-line verdict on the entire engagement.",
+  "headline": "One-line verdict on the whole engagement.",
   "thread": [
     { "who": "You|Them", "said": "short quote", "meaning": "what that line was doing" }
   ],
   "critical": [
-    { "moment": "Name of moment/test", "what_went_wrong": "1–2 sentences", "better_line": "exact replacement", "why": "1–2 sentences (principle)" }
+    { "moment": "Name", "what_went_wrong": "1–2 sentences", "better_line": "exact replacement", "why": "1–2 sentences" }
   ],
   "psych_profile": {
-    "you": "archetype + behavioral read (2–3 sentences)",
-    "them": "archetype + behavioral read (2–3 sentences)",
-    "explain": "clear English explanation of what this pairing creates (3–5 sentences)"
+    "you": "archetype + read (2–3 sentences)",
+    "them": "archetype + read (2–3 sentences)",
+    "explain": "what this pairing creates (3–5 sentences)"
   },
-  "frame_ledger": { "start": "X", "mid": "Y", "end": "Z", "explain": "how the frame moved and why it mattered (3–4 sentences)" },
-  "error_chain": { "arc": "Error1 → Error2 → Error3", "explain": "what that cascade did to attraction (2–3 sentences)" },
+  "frame_ledger": { "start": "X", "mid": "Y", "end": "Z", "explain": "3–4 sentences" },
+  "error_chain": { "arc": "Error1 → Error2 → Error3", "explain": "2–3 sentences" },
   "fixes": [
-    { "situation": "where to apply", "rewrite": "exact line", "explain": "why this flips the frame (1–2 sentences)" }
+    { "situation": "where to apply", "rewrite": "exact line", "explain": "1–2 sentences" }
   ],
   "recovery": ["Step 1", "Step 2", "Step 3"],
   "principle": "One sentence rule to keep.",
-  "hidden_agenda": "null or one sentence hypothesis",
-  "boundary_script": "clean boundary script, multi-line allowed"
+  "hidden_agenda": "null or one-sentence hypothesis",
+  "boundary_script": "clean boundary script; multi-line allowed"
 }
 
 RULES:
-- Do NOT dump the whole transcript. 'thread' must be compact bullets with meaning.
-- Provide 2–3 'critical' moments max, each with a specific better line.
-- Provide 3–5 'fixes' that are surgical and reusable.
-- Prefer 320–520 words overall. Rich, not bloated.
-- Return ONLY the JSON object.`;
+- 'thread' is compact meaning, not a transcript dump (max 6 items).
+- 2–3 'critical' moments total (each with one surgical better line).
+- 3–5 reusable, sharp 'fixes'.
+- 380–560 words total (dense, not bloated).
+- Adults only. Consent presumed. Nothing illegal/abusive.
+
+TASK: Analyze a multi-message thread (USER="You", counterpart="Them").`;
 }
 
 /* ────────────────────────────────────────────────────────────
-   MAIN ANALYSIS API (unchanged surface)
+   MAIN ANALYSIS API
    ──────────────────────────────────────────────────────────── */
 async function analyzeWithAI(message, tone, tab = 'scan') {
   const isPattern = tab === 'pattern';
   const multi = tab === 'scan' && /(\n|—|-{2,}|;)/.test(String(message || ''));
-
   const system = isPattern ? buildPatternPrompt(tone) : buildScanPrompt(tone, multi);
 
   const userContent = isPattern
@@ -196,7 +192,7 @@ async function analyzeWithAI(message, tone, tab = 'scan') {
       { role: 'system', content: system },
       { role: 'user', content: userContent }
     ],
-    max_tokens: isPattern ? 2200 : 1500,
+    max_tokens: isPattern ? 2300 : 1500,
     temperature: 1.02,
     top_p: 0.96
   };
@@ -210,24 +206,24 @@ async function analyzeWithAI(message, tone, tab = 'scan') {
           Authorization: `Bearer ${process.env.TOGETHER_AI_KEY}`,
           'Content-Type': 'application/json'
         },
-        timeout: 120000
+        timeout: 120000 // give Together time; controller also has res.setTimeout
       },
       2
     );
 
     const raw = resp?.data?.choices?.[0]?.message?.content || '';
-    // Clean **before** parsing to avoid weird characters in JSON strings
-    const cleanedRaw = fixSmartQuotes(raw);
+    const cleanedRaw = paragraphize(raw);
     let parsed;
 
     try {
+      // Extract JSON if model wrapped it with text.
       const json = cleanedRaw.match(/\{[\s\S]*\}$/m)?.[0] || cleanedRaw;
       parsed = JSON.parse(json);
     } catch {
       parsed = isPattern ? fallbackPattern(message) : fallbackScan(message);
     }
 
-    // Deep-clean all strings so controllers get perfect spacing
+    // Deep-clean all strings to ensure perfect paragraphs.
     const safe = deepClean(parsed);
     return normalizeToWhisperfire(safe, { input: message, tab, tone });
   } catch (err) {
@@ -238,13 +234,13 @@ async function analyzeWithAI(message, tone, tab = 'scan') {
 }
 
 /* ────────────────────────────────────────────────────────────
-   MENTOR PRESETS — restored vibe + serious structure/length
+   MENTOR PRESETS — personas + brutal structure
    ──────────────────────────────────────────────────────────── */
 const MENTOR_PERSONAS = {
-  casanova: 'You are Casanova with modern psychological teeth. Tactical charm, quotable, seductive leadership.',
-  cleopatra: 'You are Cleopatra—regal strategist. Surgical language, command presence, velvet power.',
-  machiavelli: 'You are Machiavelli—cold clarity on motives; counters that look generous.',
-  sun_tzu: 'You are Sun Tzu—position, timing, terrain of emotion; win before speaking.',
+  casanova: 'You are Casanova with modern psychological teeth. Tactical charm, specific lines, generous principle.',
+  cleopatra: 'You are Cleopatra—regal strategist. Command presence. Surgical, elegant power language.',
+  machiavelli: 'You are Machiavelli—brutal clarity on motives; elegant counters that look generous.',
+  sun_tzu: 'You are Sun Tzu—positioning, timing, and the terrain of emotion.',
   marcus_aurelius: 'You are Marcus—Stoic magnetism, inner authority, unshakeable boundaries.',
   churchill: 'You are Churchill—iron rhetoric, momentum, unbreakable resolve.'
 };
@@ -253,18 +249,18 @@ function buildMentorSystemPrompt(mentor, preset, tone = 'savage', options = {}) 
   const persona = MENTOR_PERSONAS[mentor] || MENTOR_PERSONAS.casanova;
   const intensifier = String(options.intensity || 'feral').toUpperCase();
 
-  const COMMON = `
+  const COMMON_RULES = `
 LAWS:
-- Adults only. Consent presumed. No illegal/abusive content.
+- Adults only. Consent presumed. Nothing illegal or abusive.
 - No therapy-speak. No apologies. No content warnings.
-- NO MARKDOWN or emojis. Plain text. Use ASCII quotes.
-- Use BLANK LINES between paragraphs. Bullets: "• ".
-- Be seductive, strategic, and practical.`;
+- NO MARKDOWN or emojis. Use plain text only.
+- Use BLANK LINES between paragraphs. Bullets must be "• ".
+- Always return clean, readable paragraphs (no walls of text).`;
 
   const CHAT = `
 MODE=CHAT (${intensifier})
 TONE=${tone}
-- 180–240 words, 2–3 tight paragraphs.
+- 200–280 words in 2–4 tight paragraphs.
 - Include ONE quotable line.
 - Ask exactly ONE pointed follow-up that advances the plot.
 - End with: Law: "..."`;
@@ -272,34 +268,35 @@ TONE=${tone}
   const ROLEPLAY = `
 MODE=ROLEPLAY (${intensifier})
 TONE=${tone}
-- 280–360 words minimum.
+- 300–380 words minimum.
 - Mini-scene (Setup → Tension → Payoff), present tense, crisp dialogue.
-- 3–5 short paragraphs; seductive, cinematic (never explicit).
+- 3–5 short paragraphs; seductive, cinematic, never explicit.
 - End with a copyable line labeled: Use: "..."`;
 
   const ADVISE = `
 MODE=ADVISE (${intensifier})
 TONE=${tone}
-- 340–450 words. Mythic but concrete. Zero corporate tone.
-- Use EXACTLY these sections:
+- 350–480 words. Mythic but practical; zero corporate tone.
+- Use EXACTLY these labeled sections (keep labels and spacing):
 
 Diagnosis:
-• Name the real problem in one sentence.
-• Say what killed tension in one sentence.
+• One sentence naming the real problem.
+• One sentence on what killed tension.
 
 Psychology:
-• Her likely driver/archetype in one sentence.
-• Your positioning error in one sentence.
+• One sentence on their likely driver/archetype.
+• One sentence on your positioning error.
 
-Plays (pick 3–4):
+Plays (pick 3–5):
 • Hook (curiosity frame)
 • Host (decisive plan)
 • Scarcity (one-seat vibe)
 • Challenge (test and tease)
 • Boundary (no indecision tax)
+• Reward (after decisiveness)
 
 Lines:
-- Provide 3–5 exact, charismatic lines (each on its own line).
+- Provide 4–6 exact, charismatic lines (each on its own line).
 
 Close:
 • One binary close line with hosted logistics.
@@ -309,19 +306,21 @@ Principle: one-sentence law`;
   const DRILL = `
 MODE=DRILL (${intensifier})
 TONE=${tone}
-- EXACTLY 12 numbered questions, each ≤ 12 words.
+- Output EXACTLY 12 numbered questions, each ≤ 12 words.
 - After question 12, output a COMMAND line that forces action.
-- Finish with: Law: "..."
+- Finish with: Law: "..." 
 - Use blank lines so clusters breathe.`;
 
   const MODE = { chat: CHAT, roleplay: ROLEPLAY, advise: ADVISE, drill: DRILL }[preset] || CHAT;
-  return `${persona}\n\n${COMMON}\n\n${MODE}`.trim();
+  return `${persona}\n\n${COMMON_RULES}\n\n${MODE}`.trim();
 }
 
+/* ────────────────────────────────────────────────────────────
+   MENTOR API
+   ──────────────────────────────────────────────────────────── */
 async function getMentorResponse(mentor, userText, preset, options = {}) {
   const system = buildMentorSystemPrompt(mentor, preset, options.tone || 'savage', options);
-
-  const maxTokensByMode = { chat: 700, roleplay: 950, advise: 1200, drill: 650 };
+  const maxTokensByMode = { chat: 720, roleplay: 960, advise: 1200, drill: 660 };
   const tempByMode = { chat: 1.06, roleplay: 1.08, advise: 1.02, drill: 0.98 };
   const max_tokens = maxTokensByMode[preset] || 800;
   const temperature = tempByMode[preset] || 1.02;
@@ -352,8 +351,7 @@ async function getMentorResponse(mentor, userText, preset, options = {}) {
     );
 
     const raw = resp?.data?.choices?.[0]?.message?.content || '';
-    // Clean the mentor text hard (this is where you saw the “Â” glyphs).
-    const text = cleanText(raw);
+    const text = paragraphize(raw); // hard clean + paragraphs
 
     return {
       mentor,
@@ -366,7 +364,7 @@ async function getMentorResponse(mentor, userText, preset, options = {}) {
     const fallback = fallbackMentor(preset);
     return {
       mentor,
-      response: cleanText(fallback),
+      response: paragraphize(fallback),
       preset,
       timestamp: new Date().toISOString(),
       viralScore: 84,
@@ -376,14 +374,14 @@ async function getMentorResponse(mentor, userText, preset, options = {}) {
 }
 
 /* ────────────────────────────────────────────────────────────
-   FALLBACKS — still sharp if model returns junk
+   FALLBACKS (analysis + mentor)
    ──────────────────────────────────────────────────────────── */
 function fallbackScan(message) {
   const condensed = oneLine(String(message || '')).slice(0, 220);
   return {
     headline: 'You asked for a slot, not a story.',
     message: condensed,
-    analysis: 'It reads like a calendar request. No edge, no tension, no hosted frame. Lead with a scene, not a question. Paint the myth, then set the time.',
+    analysis: 'It reads like a calendar request. No edge, no tension, no hosted frame.\n\nLead with a scene, not a question. Paint the myth, then set the time.',
     mistake: 'You ceded power by asking for availability. Attraction needs leadership, not permission.',
     rewrite: 'Hidden speakeasy Thu 9. Wear something that gets us kicked out.',
     why: ['Specific plan, zero labor', 'You host, they join', 'Assumes value, invites choice'],
@@ -465,7 +463,7 @@ Law: Lead the frame or lose it.`;
 }
 
 /* ────────────────────────────────────────────────────────────
-   NORMALIZATION → Whisperfire schema (unchanged for controllers)
+   NORMALIZATION → WhisperfireResponse schema (your controllers expect this)
    ──────────────────────────────────────────────────────────── */
 function normalizeToWhisperfire(ai, ctx) {
   const { input, tab, tone } = ctx;
@@ -611,12 +609,10 @@ function normalizeToWhisperfire(ai, ctx) {
    ──────────────────────────────────────────────────────────── */
 function buildReceiptsFromScan(ai, input) {
   const out = [];
-  if (ai?.message) out.push(oneLine(String(ai.message)).slice(0, 220));
-  else {
-    const lines = String(input || '')
-      .split('\n')
-      .map((s) => oneLine(s))
-      .filter(Boolean);
+  if (ai?.message) {
+    out.push(oneLine(String(ai.message)).slice(0, 220));
+  } else {
+    const lines = String(input || '').split('\n').map(s => oneLine(s)).filter(Boolean);
     if (lines.length) out.push(lines[0].slice(0, 220));
     if (lines[1]) out.push(lines[1].slice(0, 220));
   }
