@@ -1,6 +1,100 @@
-// controllers/analysisController.js - VIRAL MONSTER VERSION
+// controllers/analysisController.js - VIRAL MONSTER VERSION (CLEAN OUTPUT)
 
+// NOTE: same imports you already use
 const { analyzeWithAI, getMentorResponse } = require('../services/aiService');
+
+/* ────────────────────────────────────────────────────────────
+   INLINE SANITIZERS (no external utils, safe for JSON/SSE)
+   Removes mojibake (Â, â€™ etc), strips markdown asterisks,
+   normalizes bullets to "• ", and enforces paragraph spacing.
+──────────────────────────────────────────────────────────── */
+function fixMojibake(s = '') {
+  return String(s)
+    .replace(/â€™/g, "'")
+    .replace(/â€˜/g, "'")
+    .replace(/â€œ|â€ś|â€ž|â€\x9d|â€ť/g, '"')
+    .replace(/â€”|â€“/g, '—')
+    .replace(/â€˘|â€¢/g, '•')
+    .replace(/Â+/g, '')
+    .replace(/Ã—/g, '×')
+    .replace(/\uFFFD|\u0000/g, '');
+}
+
+function stripMarkdownNoise(s = '') {
+  let out = String(s);
+  // bold/italic/inline code/blockquote markers
+  out = out.replace(/\*\*(.*?)\*\*/g, '$1')
+           .replace(/\*(.*?)\*/g, '$1')
+           .replace(/__(.*?)__/g, '$1')
+           .replace(/_(.*?)_/g, '$1')
+           .replace(/`([^`]+)`/g, '$1')
+           .replace(/^[ \t]*>[ \t]?/gm, '');
+  return out;
+}
+
+function normalizeBullets(s = '') {
+  // turn "- foo" or "* foo" into "• foo" (but keep existing "•")
+  return String(s)
+    .replace(/^[ \t]*[-*][ \t]+/gm, '• ')
+    .replace(/[ \t]+\n/g, '\n');
+}
+
+function ensureSentenceSpacing(s = '') {
+  // ensure a space after punctuation if followed by a letter
+  return String(s).replace(/([.!?])([A-Za-z])/g, '$1 $2');
+}
+
+function normalizeWhitespace(s = '') {
+  return String(s)
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function paragraphize(s = '') {
+  // Keep bullets on separate lines; combine plain lines into paragraphs
+  const lines = String(s).split('\n');
+  const out = [];
+  let bucket = [];
+  const flush = () => { if (bucket.length) { out.push(bucket.join(' ')); bucket = []; } };
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { flush(); out.push(''); continue; }
+    if (/^•\s/.test(line)) { flush(); out.push(line); continue; }
+    bucket.push(line);
+    if (/[.!?…]"?$/.test(line)) flush();
+  }
+  flush();
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function sanitizeText(s = '') {
+  return paragraphize(
+    normalizeWhitespace(
+      ensureSentenceSpacing(
+        normalizeBullets(
+          stripMarkdownNoise(
+            fixMojibake(s)
+          )
+        )
+      )
+    )
+  );
+}
+
+function sanitizeDeep(value) {
+  if (typeof value === 'string') return sanitizeText(value);
+  if (Array.isArray(value)) return value.map(sanitizeDeep);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const k of Object.keys(value)) out[k] = sanitizeDeep(value[k]);
+    return out;
+  }
+  return value;
+}
+/* ──────────────────────────────────────────────────────────── */
 
 // UNIFIED ANALYZE ROUTE - Enhanced for viral-worthy insights
 exports.unifiedAnalyze = async (req, res) => {
@@ -18,6 +112,7 @@ exports.unifiedAnalyze = async (req, res) => {
       console.log(`🔍 SCAN ANALYSIS: Processing "${message}" with ${tone} tone`);
 
       const analysisData = await analyzeWithAI(message, tone, 'scan');
+      const clean = sanitizeDeep(analysisData);
 
       const response = {
         success: true,
@@ -31,40 +126,40 @@ exports.unifiedAnalyze = async (req, res) => {
             timestamp: new Date().toISOString(),
             analysis_type: 'Single Message Deep Dive'
           },
-          headline: analysisData.headline,
-          core_take: analysisData.coreTake || analysisData.core_take,
-          tactic: analysisData.tactic,
-          motives: analysisData.motives,
-          targeting: analysisData.targeting,
-          power_play: analysisData.powerPlay || analysisData.power_play,
-          receipts: analysisData.receipts,
-          next_moves: analysisData.nextMoves || analysisData.next_moves,
-          suggested_reply: analysisData.suggestedReply || analysisData.suggested_reply,
+          headline: clean.headline,
+          core_take: clean.coreTake || clean.core_take,
+          tactic: clean.tactic,
+          motives: clean.motives,
+          targeting: clean.targeting,
+          power_play: clean.powerPlay || clean.power_play,
+          receipts: clean.receipts,
+          next_moves: clean.nextMoves || clean.next_moves,
+          suggested_reply: clean.suggestedReply || clean.suggested_reply,
           safety: {
-            risk_level: analysisData.safety?.riskLevel || analysisData.safety?.risk_level || 'LOW',
-            notes: analysisData.safety?.notes || 'Standard communication detected'
+            risk_level: clean.safety?.riskLevel || clean.safety?.risk_level || 'LOW',
+            notes: clean.safety?.notes || 'Standard communication detected'
           },
           metrics: {
-            red_flag: analysisData.metrics?.redFlag || analysisData.metrics?.red_flag || 15,
-            certainty: analysisData.metrics?.certainty || 70,
-            viral_potential: analysisData.metrics?.viralPotential || analysisData.metrics?.viral_potential || 25,
-            manipulation_score: analysisData.metrics?.manipulationScore || analysisData.metrics?.manipulation_score || 0,
-            toxicity_level: analysisData.metrics?.toxicityLevel || analysisData.metrics?.toxicity_level || 0
+            red_flag: clean.metrics?.redFlag || clean.metrics?.red_flag || 15,
+            certainty: clean.metrics?.certainty || 70,
+            viral_potential: clean.metrics?.viralPotential || clean.metrics?.viral_potential || 25,
+            manipulation_score: clean.metrics?.manipulationScore || clean.metrics?.manipulation_score || 0,
+            toxicity_level: clean.metrics?.toxicityLevel || clean.metrics?.toxicity_level || 0
           },
           // VIRAL ENHANCEMENTS
-          viral_insights: analysisData.viralInsights || analysisData.viral_insights || {
+          viral_insights: clean.viralInsights || clean.viral_insights || {
             mind_blowing_truth: "Deep psychological patterns detected",
             quotable_wisdom: "Every message reveals the sender's deepest fears",
             psychology_explained: "Communication patterns reveal unconscious motivations",
             power_move: "Respond strategically, not emotionally"
           },
-          attachment_analysis: analysisData.attachmentAnalysis || analysisData.attachment_analysis || {
+          attachment_analysis: clean.attachmentAnalysis || clean.attachment_analysis || {
             target_style: "analyzing",
             triggers_detected: ["emotional hooks", "validation seeking"],
             wound_exploited: "fear of rejection or abandonment",
             healing_needed: "secure communication patterns"
           },
-          manipulation_map: analysisData.manipulationMap || analysisData.manipulation_map || {
+          manipulation_map: clean.manipulationMap || clean.manipulation_map || {
             primary_tactic: "standard communication",
             secondary_tactics: ["emotional appeals"],
             counter_strategy: "maintain boundaries and respond authentically",
@@ -88,6 +183,7 @@ exports.unifiedAnalyze = async (req, res) => {
       ).join('\n---\n');
 
       const analysisData = await analyzeWithAI(combinedMessage, tone, 'pattern');
+      const clean = sanitizeDeep(analysisData);
 
       const response = {
         success: true,
@@ -102,47 +198,47 @@ exports.unifiedAnalyze = async (req, res) => {
             timestamp: new Date().toISOString(),
             analysis_type: 'Multi-Message Pattern Analysis'
           },
-          headline: analysisData.headline,
-          core_take: analysisData.coreTake || analysisData.core_take,
-          tactic: analysisData.tactic,
-          motives: analysisData.motives,
-          targeting: analysisData.targeting,
-          power_play: analysisData.powerPlay || analysisData.power_play,
-          receipts: analysisData.receipts,
-          next_moves: analysisData.nextMoves || analysisData.next_moves,
-          suggested_reply: analysisData.suggestedReply || analysisData.suggested_reply,
+          headline: clean.headline,
+          core_take: clean.coreTake || clean.core_take,
+          tactic: clean.tactic,
+          motives: clean.motives,
+          targeting: clean.targeting,
+          power_play: clean.powerPlay || clean.power_play,
+          receipts: clean.receipts,
+          next_moves: clean.nextMoves || clean.next_moves,
+          suggested_reply: clean.suggestedReply || clean.suggested_reply,
           safety: {
-            risk_level: analysisData.safety?.riskLevel || analysisData.safety?.risk_level || 'LOW',
-            notes: analysisData.safety?.notes || 'Pattern analysis complete'
+            risk_level: clean.safety?.riskLevel || clean.safety?.risk_level || 'LOW',
+            notes: clean.safety?.notes || 'Pattern analysis complete'
           },
           metrics: {
-            red_flag: analysisData.metrics?.redFlag || analysisData.metrics?.red_flag || 20,
-            certainty: analysisData.metrics?.certainty || 80,
-            viral_potential: analysisData.metrics?.viralPotential || analysisData.metrics?.viral_potential || 30,
-            manipulation_score: analysisData.metrics?.manipulationScore || analysisData.metrics?.manipulation_score || 0,
-            toxicity_level: analysisData.metrics?.toxicityLevel || analysisData.metrics?.toxicity_level || 0
+            red_flag: clean.metrics?.redFlag || clean.metrics?.red_flag || 20,
+            certainty: clean.metrics?.certainty || 80,
+            viral_potential: clean.metrics?.viralPotential || clean.metrics?.viral_potential || 30,
+            manipulation_score: clean.metrics?.manipulationScore || clean.metrics?.manipulation_score || 0,
+            toxicity_level: clean.metrics?.toxicityLevel || clean.metrics?.toxicity_level || 0
           },
           // ENHANCED PATTERN FIELDS
-          pattern: analysisData.pattern || {
+          pattern: clean.pattern || {
             cycle: `Behavioral cycle detected across ${messages.length} messages`,
             prognosis: "Pattern analysis reveals communication trends",
             escalation_detected: false,
             consistency_score: 75
           },
           // VIRAL ENHANCEMENTS
-          viral_insights: analysisData.viralInsights || analysisData.viral_insights || {
+          viral_insights: clean.viralInsights || clean.viral_insights || {
             mind_blowing_truth: "Recurring patterns reveal deeper psychological programming",
             quotable_wisdom: "People don't change their communication - they reveal who they are",
             psychology_explained: "Consistent communication patterns indicate core personality traits and attachment styles",
             power_move: "Use pattern recognition to predict and prepare for future interactions"
           },
-          attachment_analysis: analysisData.attachmentAnalysis || analysisData.attachment_analysis || {
+          attachment_analysis: clean.attachmentAnalysis || clean.attachment_analysis || {
             target_style: "pattern-based assessment",
             triggers_detected: ["consistency markers", "escalation points"],
             wound_exploited: "chronic insecurity or control needs",
             healing_needed: "pattern interruption and conscious communication"
           },
-          manipulation_map: analysisData.manipulationMap || analysisData.manipulation_map || {
+          manipulation_map: clean.manipulationMap || clean.manipulation_map || {
             primary_tactic: "behavioral consistency",
             secondary_tactics: ["pattern establishment", "expectation setting"],
             counter_strategy: "break expected response patterns to disrupt manipulation cycles",
@@ -150,14 +246,14 @@ exports.unifiedAnalyze = async (req, res) => {
           },
           ambiguity: null,
           // PATTERN-SPECIFIC ENHANCED FIELDS (matching original structure)
-          hidden_agenda: analysisData.hiddenAgenda || analysisData.hidden_agenda,
-          archetypes: analysisData.archetypes,
-          trigger_pattern_map: analysisData.triggerPatternMap || analysisData.trigger_pattern_map,
-          contradictions: analysisData.contradictions,
-          weapons: analysisData.weapons,
-          forecast: analysisData.forecast,
-          counter_intervention: analysisData.counterIntervention || analysisData.counter_intervention,
-          long_game: analysisData.longGame || analysisData.long_game
+          hidden_agenda: clean.hiddenAgenda || clean.hidden_agenda,
+          archetypes: clean.archetypes,
+          trigger_pattern_map: clean.triggerPatternMap || clean.trigger_pattern_map,
+          contradictions: clean.contradictions,
+          weapons: clean.weapons,
+          forecast: clean.forecast,
+          counter_intervention: clean.counterIntervention || clean.counter_intervention,
+          long_game: clean.longGame || clean.long_game
         }
       };
 
@@ -206,6 +302,7 @@ exports.analyzeScan = async (req, res) => {
     console.log(`🔍 DEDICATED SCAN: Analyzing "${message.substring(0, 50)}..." with ${tone} intensity`);
 
     const analysisData = await analyzeWithAI(message, tone, 'scan');
+    const clean = sanitizeDeep(analysisData);
 
     const response = {
       success: true,
@@ -219,39 +316,39 @@ exports.analyzeScan = async (req, res) => {
           analysis_depth: 'deep_psychological_scan',
           timestamp: new Date().toISOString()
         },
-        headline: analysisData.headline,
-        core_take: analysisData.coreTake || analysisData.core_take,
-        tactic: analysisData.tactic,
-        motives: analysisData.motives,
-        targeting: analysisData.targeting,
-        power_play: analysisData.powerPlay || analysisData.power_play,
-        receipts: analysisData.receipts,
-        next_moves: analysisData.nextMoves || analysisData.next_moves,
-        suggested_reply: analysisData.suggestedReply || analysisData.suggested_reply,
+        headline: clean.headline,
+        core_take: clean.coreTake || clean.core_take,
+        tactic: clean.tactic,
+        motives: clean.motives,
+        targeting: clean.targeting,
+        power_play: clean.powerPlay || clean.power_play,
+        receipts: clean.receipts,
+        next_moves: clean.nextMoves || clean.next_moves,
+        suggested_reply: clean.suggestedReply || clean.suggested_reply,
         safety: {
-          risk_level: analysisData.safety?.riskLevel || analysisData.safety?.risk_level || 'LOW',
-          notes: analysisData.safety?.notes || 'Psychological scan complete'
+          risk_level: clean.safety?.riskLevel || clean.safety?.risk_level || 'LOW',
+          notes: clean.safety?.notes || 'Psychological scan complete'
         },
         metrics: {
-          red_flag: analysisData.metrics?.redFlag || analysisData.metrics?.red_flag || 15,
-          certainty: analysisData.metrics?.certainty || 70,
-          viral_potential: analysisData.metrics?.viralPotential || analysisData.metrics?.viral_potential || 25,
-          manipulation_score: analysisData.metrics?.manipulationScore || 0,
-          toxicity_level: analysisData.metrics?.toxicityLevel || 0
+          red_flag: clean.metrics?.redFlag || clean.metrics?.red_flag || 15,
+          certainty: clean.metrics?.certainty || 70,
+          viral_potential: clean.metrics?.viralPotential || clean.metrics?.viral_potential || 25,
+          manipulation_score: clean.metrics?.manipulationScore || 0,
+          toxicity_level: clean.metrics?.toxicityLevel || 0
         },
-        viral_insights: analysisData.viralInsights || {
+        viral_insights: clean.viralInsights || {
           mind_blowing_truth: "Single message analysis reveals core communication patterns",
           quotable_wisdom: "Every word choice reveals unconscious psychological states",
           psychology_explained: "Message structure indicates underlying emotional drivers",
           power_move: "Respond to the psychology, not just the words"
         },
-        attachment_analysis: analysisData.attachmentAnalysis || {
+        attachment_analysis: clean.attachmentAnalysis || {
           target_style: "single-message assessment",
           triggers_detected: ["emotional markers detected"],
           wound_exploited: "analyzing for psychological vulnerabilities",
           healing_needed: "conscious communication practices"
         },
-        manipulation_map: analysisData.manipulationMap || {
+        manipulation_map: clean.manipulationMap || {
           primary_tactic: "message-level analysis",
           secondary_tactics: ["word choice patterns"],
           counter_strategy: "strategic response to underlying psychology",
@@ -300,6 +397,7 @@ exports.analyzePattern = async (req, res) => {
     ).join('\n---PATTERN BREAK---\n');
 
     const analysisData = await analyzeWithAI(combinedMessage, tone, 'pattern');
+    const clean = sanitizeDeep(analysisData);
 
     const response = {
       success: true,
@@ -314,45 +412,45 @@ exports.analyzePattern = async (req, res) => {
           analysis_depth: 'deep_behavioral_pattern_analysis',
           timestamp: new Date().toISOString()
         },
-        headline: analysisData.headline,
-        core_take: analysisData.coreTake || analysisData.core_take,
-        tactic: analysisData.tactic,
-        motives: analysisData.motives,
-        targeting: analysisData.targeting,
-        power_play: analysisData.powerPlay || analysisData.power_play,
-        receipts: analysisData.receipts,
-        next_moves: analysisData.nextMoves || analysisData.next_moves,
-        suggested_reply: analysisData.suggestedReply || analysisData.suggested_reply,
+        headline: clean.headline,
+        core_take: clean.coreTake || clean.core_take,
+        tactic: clean.tactic,
+        motives: clean.motives,
+        targeting: clean.targeting,
+        power_play: clean.powerPlay || clean.power_play,
+        receipts: clean.receipts,
+        next_moves: clean.nextMoves || clean.next_moves,
+        suggested_reply: clean.suggestedReply || clean.suggested_reply,
         safety: {
-          risk_level: analysisData.safety?.riskLevel || analysisData.safety?.risk_level || 'LOW',
+          risk_level: clean.safety?.riskLevel || clean.safety?.risk_level || 'LOW',
           notes: 'Deep pattern analysis complete'
         },
         metrics: {
-          red_flag: analysisData.metrics?.redFlag || analysisData.metrics?.red_flag || 20,
-          certainty: analysisData.metrics?.certainty || 80,
-          viral_potential: analysisData.metrics?.viralPotential || analysisData.metrics?.viral_potential || 30,
-          manipulation_score: analysisData.metrics?.manipulationScore || 0,
-          toxicity_level: analysisData.metrics?.toxicityLevel || 0
+          red_flag: clean.metrics?.redFlag || clean.metrics?.red_flag || 20,
+          certainty: clean.metrics?.certainty || 80,
+          viral_potential: clean.metrics?.viralPotential || clean.metrics?.viral_potential || 30,
+          manipulation_score: clean.metrics?.manipulationScore || 0,
+          toxicity_level: clean.metrics?.toxicityLevel || 0
         },
-        pattern: analysisData.pattern || {
+        pattern: clean.pattern || {
           cycle: `Advanced behavioral cycle mapped across ${messages.length} interactions`,
           prognosis: "Deep pattern analysis reveals psychological programming",
           escalation_detected: messages.length > 3,
           consistency_score: 85
         },
-        viral_insights: analysisData.viralInsights || {
+        viral_insights: clean.viralInsights || {
           mind_blowing_truth: "Behavioral patterns reveal unconscious psychological programming that drives all future interactions",
           quotable_wisdom: "Show me someone's patterns, and I'll show you their soul",
           psychology_explained: "Consistent communication patterns indicate deep-seated psychological drivers and unhealed wounds",
           power_move: "Break their expected pattern to disrupt their psychological programming"
         },
-        attachment_analysis: analysisData.attachmentAnalysis || {
+        attachment_analysis: clean.attachmentAnalysis || {
           target_style: "pattern-revealed attachment style",
           triggers_detected: ["recurring emotional patterns", "consistency indicators"],
           wound_exploited: "chronic psychological patterns indicate deep emotional wounds",
           healing_needed: "pattern interruption therapy and conscious communication training"
         },
-        manipulation_map: analysisData.manipulationMap || {
+        manipulation_map: clean.manipulationMap || {
           primary_tactic: "behavioral conditioning through pattern establishment",
           secondary_tactics: ["consistency pressure", "expectation management", "emotional conditioning"],
           counter_strategy: "systematic pattern disruption and boundary enforcement",
@@ -360,14 +458,14 @@ exports.analyzePattern = async (req, res) => {
         },
         ambiguity: null,
         // ENHANCED PATTERN-SPECIFIC FIELDS (matching original structure)
-        hidden_agenda: analysisData.hiddenAgenda || analysisData.hidden_agenda,
-        archetypes: analysisData.archetypes,
-        trigger_pattern_map: analysisData.triggerPatternMap || analysisData.trigger_pattern_map,
-        contradictions: analysisData.contradictions,
-        weapons: analysisData.weapons,
-        forecast: analysisData.forecast,
-        counter_intervention: analysisData.counterIntervention || analysisData.counter_intervention,
-        long_game: analysisData.longGame || analysisData.long_game
+        hidden_agenda: clean.hiddenAgenda || clean.hidden_agenda,
+        archetypes: clean.archetypes,
+        trigger_pattern_map: clean.triggerPatternMap || clean.trigger_pattern_map,
+        contradictions: clean.contradictions,
+        weapons: clean.weapons,
+        forecast: clean.forecast,
+        counter_intervention: clean.counterIntervention || clean.counter_intervention,
+        long_game: clean.longGame || clean.long_game
       }
     };
 
@@ -382,7 +480,7 @@ exports.analyzePattern = async (req, res) => {
   }
 };
 
-// ENHANCED MENTOR CHAT ROUTE
+// ENHANCED MENTOR CHAT ROUTE (left intact)
 exports.mentorChat = async (req, res) => {
   // mentor is quick, but keep same protection for consistency
   res.setTimeout?.(125000);
