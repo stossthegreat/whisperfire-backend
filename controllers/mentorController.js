@@ -1,53 +1,64 @@
 // controllers/mentorController.js
-// Minimal, surgical fix: UTF-8 charset + smart-quote cleanup + paragraph spacing.
-// Does NOT change your prompts or analysis code. Just cleans Mentor output.
+// Mentor SSE/JSON controller with hard UTF-8 clean + paragraph shaping
 
 const { getMentorResponse } = require('../services/aiService');
 
-/* ---------- tiny cleaners (safe) ---------- */
-function toAsciiQuotes(s = '') {
+// --- Text cleaners (pure functions, no external deps) ---
+function fixSmartQuotes(s = '') {
   return String(s)
-    // kill mojibake roots
-    .replace(/Â+/g, '')
-    // smart quotes/dashes → ASCII
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/[–—]/g, '-')
-    // stray encodes of apostrophe
-    .replace(/â€™/g, "'")
-    .replace(/\u00A0/g, ' ');
+    .replace(/Â+/g, '')                             // stray Â
+    .replace(/â€™|Ã¢â‚¬â„¢|â\u0080\u0099/g, "'")   // right single
+    .replace(/â€˜|Ã¢â‚¬Ëœ|â\u0080\u0098/g, "'")    // left single
+    .replace(/â€œ|Ã¢â‚¬Å“|â\u0080\u009C/g, '"')    // left double
+    .replace(/â€�|Ã¢â‚¬Â|â\u0080\u009D/g, '"')    // right double
+    .replace(/â€”|Ã¢â‚¬â¢|â\u0080\u0094/g, '—')  // em dash
+    .replace(/â€“|Ã¢â‚¬â€œ|â\u0080\u0093/g, '–')   // en dash
+    .replace(/\u00A0/g, ' ');                      // NBSP → space
 }
 
-function stripWeirdMarkdown(s = '') {
+function stripWeirdGlyphs(s = '') {
   return String(s)
-    .replace(/^[\*\u2022\-]{1,2}\s*/gm, '') // leading bullets
-    .replace(/[>`_#]/g, '');                // stray md chars
+    .replace(/[\u200B-\u200D\uFEFF]/g, '') // zero-width junk
+    .replace(/^[\*\u2022\-]{1,2}\s*/gm, '') // leading bullets/asterisks
+    .replace(/[>`_#]/g, '');                // stray markdown tokens
 }
 
+// Enforce readable paragraphs from plain text
 function paragraphize(s = '') {
-  // add a blank line after sentence end if it’s jammed
-  let t = String(s)
-    .replace(/([a-z0-9\)\]"'])([.!?])\s+(?=[A-Z0-9"'\(])/g, '$1$2\n\n')
-    .replace(/([a-z0-9])([.!?])([A-Z])/g, '$1$2 $3'); // fix glued caps
-  t = t.replace(/\n{3,}/g, '\n\n')
-       .replace(/[ \t]+\n/g, '\n')
-       .replace(/[ \t]{2,}/g, ' ');
+  let t = fixSmartQuotes(stripWeirdGlyphs(String(s)));
+
+  // Add a space after sentence punctuation if glued to a capital/quote
+  t = t.replace(/([a-z0-9])([.!?])([A-Z"'])/g, '$1$2 $3');
+
+  // Break around section labels so they start new blocks
+  t = t.replace(/\s*(?=(?:Diagnosis:|Psychology:|Plays|Lines:|Close:|Principle:|Principles:|Law:|Use:|Boundary|Recovery))/g, '\n\n');
+
+  // Turn single-line bulleted-ish runs into real bullets
+  t = t.replace(/(^|\n)\s*(?:-|\u2022|\*)\s+/g, '\n• ');
+
+  // Encourage paragraphs after sentence stops
+  t = t.replace(/([.!?])\s+(?=[A-Z0-9"'\(])/g, '$1\n\n');
+
+  // Collapse excessive blank lines / spaces
+  t = t.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+
   return t.trim();
 }
 
-function cleanMentorText(s = '') {
-  return paragraphize(stripWeirdMarkdown(toAsciiQuotes(s)));
+function sanitizeForSSE(s = '') {
+  return String(s).replace(/\r/g, '').replace(/\u0000/g, '');
 }
 
-/* ---------- controller ---------- */
+function cleanMentorText(s = '') {
+  return paragraphize(s);
+}
+
 exports.mentorsChat = async (req, res) => {
   try {
     const { mentor, user_text, userText, preset, options } = req.body || {};
     const actualUserText = user_text || userText;
 
     if (!mentor || !actualUserText || !preset) {
-      // ensure JSON path also declares utf-8
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
       return res.status(400).json({
         error: 'Missing required fields: mentor, user_text, and preset are required',
         received: { mentor: !!mentor, user_text: !!actualUserText, preset: !!preset }
@@ -57,10 +68,9 @@ exports.mentorsChat = async (req, res) => {
     const useStream = !!(options && options.stream);
 
     if (!useStream) {
-      // JSON mode — force utf-8 and clean text
+      // JSON mode
       const out = await getMentorResponse(mentor, actualUserText, preset, options || {});
       const text = cleanMentorText(out.response);
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
       return res.json({
         success: true,
         data: {
@@ -73,7 +83,7 @@ exports.mentorsChat = async (req, res) => {
       });
     }
 
-    // SSE mode — **critical**: include charset
+    // SSE mode
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
@@ -93,7 +103,7 @@ exports.mentorsChat = async (req, res) => {
       })}\n\n`);
 
       const out = await getMentorResponse(mentor, actualUserText, preset, options || {});
-      const text = cleanMentorText(out.response);
+      const text = sanitizeForSSE(cleanMentorText(out.response));
 
       res.write(`data: ${JSON.stringify({
         type: 'wisdom',
@@ -114,7 +124,6 @@ exports.mentorsChat = async (req, res) => {
     }
   } catch (error) {
     if (!res.headersSent) {
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
       return res.status(500).json({
         error: 'Failed to generate mentor response',
         details: process.env.NODE_ENV === 'development' ? error.message : undefined
