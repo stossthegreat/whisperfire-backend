@@ -1,4 +1,4 @@
-// services/aiService.js — ORACLE SEDUCER v3 MAX (Together AI intact, long-form, timeout-safe)
+// services/aiService.js — ORACLE SEDUCER v3 MAX (stabilized JSON + strict retry)
 const axios = require('axios');
 const http = require('http');
 const https = require('https');
@@ -34,41 +34,11 @@ async function postWithRetry(url, data, config, retries = 2) {
   throw lastErr;
 }
 
-/* ===================== NEW: robust JSON extraction helpers ==================== */
-function stripCodeFences(s = '') {
-  return String(s)
-    .replace(/```json\s*([\s\S]*?)\s*```/gi, '$1')
-    .replace(/```\s*([\s\S]*?)\s*```/g, '$1');
-}
-
-function extractFirstJsonObject(s = '') {
-  s = stripCodeFences(s);
-  let depth = 0, start = -1;
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (ch === '{') { if (depth === 0) start = i; depth++; }
-    else if (ch === '}') { depth--; if (depth === 0 && start !== -1) return s.slice(start, i + 1); }
-  }
-  return null;
-}
-
-function safeParseJsonLoose(text) {
-  const block = extractFirstJsonObject(text) || text;
-  const cleaned = String(block)
-    .replace(/[\u2018\u2019]/g, "'")   // smart single → ascii
-    .replace(/[\u201C\u201D]/g, '"')   // smart double → ascii
-    .replace(/,\s*([}\]])/g, '$1');    // trailing commas
-  return JSON.parse(cleaned);
-}
-/* ============================================================================ */
-
 /* ============================================================
-   PROMPT BUILDERS — same keys, way more depth (NO schema change)
+   PROMPT BUILDERS — same keys, more depth (NO schema change)
    ============================================================ */
 
 function buildScanPrompt(tone, multi) {
-  // Output keys unchanged. We just ask for richer content inside each string,
-  // but keep "why" EXACTLY 3 bullets to match your normalizer.
   return `
 ROLE: You are the world's sharpest seduction mentor (Casanova × Cleopatra × Sun Tzu).
 You coach the USER with surgical clarity. You rebuild their line and give laws to carry.
@@ -102,7 +72,6 @@ RETURN: Only the JSON object. No preface.`;
 }
 
 function buildPatternPrompt(tone, count) {
-  // Same exact keys as your v3; we just ask for more depth/length inside.
   return `
 ROLE: You are the war-room strategist of seduction. You do not dump transcripts; you decode moves and frame transfers.
 
@@ -147,71 +116,115 @@ RETURN: Only the JSON object.`;
 }
 
 /* ============================================================
+   JSON HELPERS — tolerant extractor + safe parse
+   ============================================================ */
+
+function stripFences(s = '') {
+  // remove ```json ... ``` or ``` ... ```
+  return String(s).replace(/```json|```/gi, '');
+}
+
+function extractFirstJsonObject(s = '') {
+  // Find first balanced {...} block. Handles extra prose before/after.
+  const text = stripFences(s);
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  // unbalanced → try last closing brace best-effort
+  const last = text.lastIndexOf('}');
+  return last > start ? text.slice(start, last + 1) : null;
+}
+
+function tryParseJson(raw) {
+  if (!raw) return null;
+  const first = extractFirstJsonObject(raw);
+  if (!first) return null;
+  try { return JSON.parse(first); } catch { return null; }
+}
+
+/* ============================================================
    MAIN ANALYSIS — Together AI request + robust normalization
    ============================================================ */
 
 async function analyzeWithAI(message, tone, tab = 'scan') {
+  const isPattern = tab === 'pattern';
+  const multi = tab === 'scan' && /(\n|—|-{2,}|;)/.test(String(message || ''));
+  const system = isPattern
+    ? buildPatternPrompt(tone, (String(message || '').match(/\n/g) || []).length + 1)
+    : buildScanPrompt(tone, multi);
+
+  // Pass 1: lower entropy + more headroom (reduces JSON mistakes & truncation)
+  const req1 = {
+    model: MODEL,
+    messages: [
+      { role: 'system', content: system },
+      {
+        role: 'user',
+        content: isPattern
+          ? `THREAD (alternating "You:" / "Them:"):\n${message}\n\nFollow the exact JSON schema.`
+          : `MESSAGE(S):\n${message}\n\nFollow the exact JSON schema.`
+      }
+    ],
+    max_tokens: isPattern ? 3200 : 2200,
+    temperature: 0.6,
+    top_p: 0.92
+  };
+
   try {
-    const isPattern = tab === 'pattern';
-    const multi = tab === 'scan' && /(\n|—|-{2,}|;)/.test(String(message || ''));
-    const system = isPattern
-      ? buildPatternPrompt(tone, (String(message || '').match(/\n/g) || []).length + 1)
-      : buildScanPrompt(tone, multi);
-
-    const requestBody = {
-      model: MODEL,
-      messages: [
-        { role: 'system', content: system },
-        {
-          role: 'user',
-          content: isPattern
-            ? `THREAD (alternating "You:" / "Them:"):\n${message}\n\nFollow the exact JSON schema.`
-            : `MESSAGE(S):\n${message}\n\nFollow the exact JSON schema.`
-        }
-      ],
-      // More headroom for the long instructions above
-      max_tokens: isPattern ? 2400 : 1600,
-      temperature: 0.92,
-      top_p: 0.96
-    };
-
-    const resp = await postWithRetry(
+    const resp1 = await postWithRetry(
       DEEPSEEK_API_URL,
-      requestBody,
+      req1,
       {
         headers: {
           Authorization: `Bearer ${process.env.TOGETHER_AI_KEY}`,
           'Content-Type': 'application/json'
         },
-        // A real-world 120s ceiling + keep-alive (prevents "Analyze timeout" drops)
         timeout: 120000
       },
       2
     );
 
-    const raw = resp?.data?.choices?.[0]?.message?.content || '';
-    let parsed;
-    try {
-      // NEW: tolerant parse
-      parsed = safeParseJsonLoose(raw);
-    } catch (e1) {
-      // NEW: ONE internal retry asking strictly for valid JSON (lower temp)
-      try {
-        const strictResp = await postWithRetry(
-          DEEPSEEK_API_URL,
+    const raw1 = resp1?.data?.choices?.[0]?.message?.content || '';
+    let parsed = tryParseJson(raw1);
+
+    // Pass 2 (only if parse failed): strict, low-entropy JSON-only instruction
+    if (!parsed) {
+      const strictSystem = `${system}
+
+ABSOLUTE FORMAT RULES:
+- Return ONLY valid JSON (no preface, no markdown, no commentary).
+- Do not include code fences.
+- If unsure about a field, still return the key with a sane string value.
+- Keep arrays exactly as specified.`;
+
+      const req2 = {
+        model: MODEL,
+        messages: [
+          { role: 'system', content: strictSystem },
           {
-            model: MODEL,
-            messages: [
-              { role: 'system', content: system + '\n\nIMPORTANT: Return ONLY a valid JSON object. No markdown, no prose.' },
-              { role: 'user', content: isPattern
-                  ? `Return ONLY valid JSON. THREAD:\n${message}`
-                  : `Return ONLY valid JSON. MESSAGE(S):\n${message}`
-              }
-            ],
-            max_tokens: isPattern ? 2000 : 1400,
-            temperature: 0.35,
-            top_p: 0.9
-          },
+            role: 'user',
+            content: isPattern
+              ? `Return ONLY valid JSON for this thread. No prose, no fences.\n${message}`
+              : `Return ONLY valid JSON for this message. No prose, no fences.\n${message}`
+          }
+        ],
+        max_tokens: isPattern ? 3000 : 2000,
+        temperature: 0.35,
+        top_p: 0.90
+      };
+
+      try {
+        const resp2 = await postWithRetry(
+          DEEPSEEK_API_URL,
+          req2,
           {
             headers: {
               Authorization: `Bearer ${process.env.TOGETHER_AI_KEY}`,
@@ -221,18 +234,22 @@ async function analyzeWithAI(message, tone, tab = 'scan') {
           },
           1
         );
-        const raw2 = strictResp?.data?.choices?.[0]?.message?.content || '';
-        parsed = safeParseJsonLoose(raw2);
+        const raw2 = resp2?.data?.choices?.[0]?.message?.content || '';
+        parsed = tryParseJson(raw2);
       } catch (e2) {
-        // Fallback stays same shape
-        parsed = isPattern ? fallbackPattern(message, tone) : fallbackScan(message, tone);
+        // fall through to fallback below
       }
+    }
+
+    if (!parsed) {
+      const fb = isPattern ? fallbackPattern(message, tone) : fallbackScan(message, tone);
+      return normalizeToWhisperfire(fb, { input: message, tab, tone });
     }
 
     return normalizeToWhisperfire(parsed, { input: message, tab, tone });
   } catch (err) {
     console.error('analyzeWithAI error:', err?.response?.data || err.message);
-    const fb = tab === 'pattern' ? fallbackPattern(message, tone) : fallbackScan(message, tone);
+    const fb = isPattern ? fallbackPattern(message, tone) : fallbackScan(message, tone);
     return normalizeToWhisperfire(fb, { input: message, tab, tone });
   }
 }
@@ -314,9 +331,7 @@ function normalizeToWhisperfire(ai, ctx) {
   (Array.isArray(ai?.fixes) ? ai.fixes : []).slice(0, 3).forEach(fx => {
     if (fx?.explain) whyBullets.push(oneLine(fx.explain).slice(0, 80));
   });
-  if (whyBullets.length < 3 && ai?.principle) {
-    whyBullets.push(oneLine(ai.principle));
-  }
+  if (whyBullets.length < 3 && ai?.principle) whyBullets.push(oneLine(ai.principle));
   while (whyBullets.length < 3) whyBullets.push('Host logistics; never beg');
 
   const nextMoves = (Array.isArray(ai?.recovery) ? ai.recovery : []).map(s => s?.trim()).filter(Boolean).join('\n') ||
@@ -541,8 +556,7 @@ function clampInt(n, min, max) {
 }
 
 /* ============================================================
-   MENTORS — keep your v3 feel (you said it was better)
-   (If you want me to 10x mentor content too, say the word.)
+   MENTORS — unchanged
    ============================================================ */
 
 const MENTOR_PROMPTS = {
