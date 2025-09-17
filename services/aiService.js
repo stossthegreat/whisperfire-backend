@@ -34,6 +34,34 @@ async function postWithRetry(url, data, config, retries = 2) {
   throw lastErr;
 }
 
+/* ===================== NEW: robust JSON extraction helpers ==================== */
+function stripCodeFences(s = '') {
+  return String(s)
+    .replace(/```json\s*([\s\S]*?)\s*```/gi, '$1')
+    .replace(/```\s*([\s\S]*?)\s*```/g, '$1');
+}
+
+function extractFirstJsonObject(s = '') {
+  s = stripCodeFences(s);
+  let depth = 0, start = -1;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '{') { if (depth === 0) start = i; depth++; }
+    else if (ch === '}') { depth--; if (depth === 0 && start !== -1) return s.slice(start, i + 1); }
+  }
+  return null;
+}
+
+function safeParseJsonLoose(text) {
+  const block = extractFirstJsonObject(text) || text;
+  const cleaned = String(block)
+    .replace(/[\u2018\u2019]/g, "'")   // smart single → ascii
+    .replace(/[\u201C\u201D]/g, '"')   // smart double → ascii
+    .replace(/,\s*([}\]])/g, '$1');    // trailing commas
+  return JSON.parse(cleaned);
+}
+/* ============================================================================ */
+
 /* ============================================================
    PROMPT BUILDERS — same keys, way more depth (NO schema change)
    ============================================================ */
@@ -164,12 +192,41 @@ async function analyzeWithAI(message, tone, tab = 'scan') {
     const raw = resp?.data?.choices?.[0]?.message?.content || '';
     let parsed;
     try {
-      // Extract JSON if model wrapped with pre/post text
-      const json = raw.match(/\{[\s\S]*\}$/m)?.[0] || raw;
-      parsed = JSON.parse(json);
-    } catch (e) {
-      // Fallback stays same shape
-      parsed = isPattern ? fallbackPattern(message, tone) : fallbackScan(message, tone);
+      // NEW: tolerant parse
+      parsed = safeParseJsonLoose(raw);
+    } catch (e1) {
+      // NEW: ONE internal retry asking strictly for valid JSON (lower temp)
+      try {
+        const strictResp = await postWithRetry(
+          DEEPSEEK_API_URL,
+          {
+            model: MODEL,
+            messages: [
+              { role: 'system', content: system + '\n\nIMPORTANT: Return ONLY a valid JSON object. No markdown, no prose.' },
+              { role: 'user', content: isPattern
+                  ? `Return ONLY valid JSON. THREAD:\n${message}`
+                  : `Return ONLY valid JSON. MESSAGE(S):\n${message}`
+              }
+            ],
+            max_tokens: isPattern ? 2000 : 1400,
+            temperature: 0.35,
+            top_p: 0.9
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.TOGETHER_AI_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            timeout: 120000
+          },
+          1
+        );
+        const raw2 = strictResp?.data?.choices?.[0]?.message?.content || '';
+        parsed = safeParseJsonLoose(raw2);
+      } catch (e2) {
+        // Fallback stays same shape
+        parsed = isPattern ? fallbackPattern(message, tone) : fallbackScan(message, tone);
+      }
     }
 
     return normalizeToWhisperfire(parsed, { input: message, tab, tone });
