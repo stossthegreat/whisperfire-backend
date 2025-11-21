@@ -487,56 +487,84 @@ function clampInt(n, min, max) {
 /* ===========================
    MENTORS (unchanged)
    =========================== */
-// Import all 80 mentor prompts from separate file
+// Import mentor prompts and enhanced system
 const { MENTOR_PROMPTS } = require('./mentorPrompts');
+const { 
+  getEnhancedMentorResponse, 
+  buildEnhancedSystemPrompt,
+  detectConversationStage,
+  detectUserLevel,
+  calculateEnhancedViralScore
+} = require('./mentorEnhanced');
 
 async function getMentorResponse(mentor, userText, preset, options = {}) {
   try {
-    const persona = MENTOR_PROMPTS[mentor] || MENTOR_PROMPTS.casanova;
-    const modes = {
-      drill: `DRILL: Ask hard questions that force self-honesty. End with one quotable law.`,
-      advise: `ADVISE: Give 3 sharp insights + 1 exact line to use. End with a law.`,
-      roleplay: `ROLEPLAY: Speak fully in-character. 180–240 words. End with a law.`,
-      chat: `CHAT: Natural but elite. 150–220 words. End with a law.`
-    };
-    const mode = modes[preset] || modes.chat;
-
-    // Inject memory context if available
-    let memoryPrompt = '';
-    if (options.memoryContext && options.memoryContext.summary) {
-      memoryPrompt = `\n\nCONTEXT FROM MEMORY:\n${options.memoryContext.summary}\n\nUse this context to provide continuity and reference past conversations when relevant.`;
+    // Get enhanced configuration
+    const enhanced = await getEnhancedMentorResponse(mentor, userText, preset, options);
+    
+    // Build conversation history if available
+    let conversationHistory = [];
+    if (options.memoryContext && options.memoryContext.shortTerm) {
+      conversationHistory = options.memoryContext.shortTerm;
     }
-
-    const system = `${persona}\n\n${mode}\n\nRules:\n- No fluff. Deep, practical, quotable.\n- Include one "forbidden knowledge" insight.\n- Plain ASCII quotes only.\n- End with: Law: "<one sentence>"${memoryPrompt}`;
+    
+    // Construct messages array with full context
+    const messages = [
+      { role: 'system', content: enhanced.systemPrompt }
+    ];
+    
+    // Add conversation history (last 6 messages for context)
+    if (conversationHistory.length > 0) {
+      conversationHistory.slice(-6).forEach(msg => {
+        messages.push({
+          role: msg.sender === 'user' ? 'user' : 'assistant',
+          content: msg.text
+        });
+      });
+    }
+    
+    // Add current user message
+    messages.push({ role: 'user', content: userText });
+    
+    console.log(`🧠 Enhanced prompt: stage=${enhanced.conversationStage}, level=${enhanced.userLevel}, tokens=${enhanced.maxTokens}`);
 
     const resp = await postWithRetry(
       DEEPSEEK_API_URL,
       {
         model: MODEL,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: userText }
-        ],
-        max_tokens: 700,
-        temperature: 0.6,
-        top_p: 0.9
+        messages: messages,
+        max_tokens: enhanced.maxTokens, // Dynamic allocation
+        temperature: enhanced.temperature, // Adaptive temperature
+        top_p: 0.92,
+        frequency_penalty: 0.15, // Reduce repetition
+        presence_penalty: 0.15 // Encourage new ideas
       },
       {
         headers: { Authorization: `Bearer ${process.env.TOGETHER_AI_KEY}`, 'Content-Type': 'application/json' },
-        timeout: 90000
+        timeout: 120000
       },
       2
     );
 
     const text = resp?.data?.choices?.[0]?.message?.content || '';
+    const viralScore = calculateEnhancedViralScore(text);
+    
+    console.log(`📊 Response: ${text.length} chars, viral=${viralScore}`);
+    
     return {
       mentor,
       response: text,
       preset,
       timestamp: new Date().toISOString(),
-      viralScore: scoreViral(text)
+      viralScore,
+      metadata: {
+        conversationStage: enhanced.conversationStage,
+        userLevel: enhanced.userLevel,
+        tokensUsed: enhanced.maxTokens
+      }
     };
-  } catch {
+  } catch (err) {
+    console.error(`❌ Mentor error for ${mentor}:`, err.message);
     const fallback = `Uncomfortable truth: you speak like permission, not gravity.
 
 Offer a myth, host the plan, and close cleanly.

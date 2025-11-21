@@ -46,14 +46,11 @@ async function initRedis() {
       }
     };
     
-    // Only add password if it exists and isn't empty
+    // Railway Redis v7 uses ACL - ALWAYS set username AND password
     if (password && password !== '') {
       config.password = password;
-    }
-    
-    // Only add username if it's not 'default' (redis default)
-    if (username && username !== 'default' && username !== '') {
-      config.username = username;
+      // For ACL auth, username is REQUIRED (even if it's 'default')
+      config.username = username || 'default';
     }
     
     redisClient = redis.createClient(config);

@@ -114,12 +114,21 @@ exports.mentorsChat = async (req, res) => {
     }
 
     if (!useStream) {
-      // JSON mode (clean + utf-8) with memory injection
+      // JSON mode (clean + utf-8) with ENHANCED memory injection
+      const enhancedOptions = {
+        ...options,
+        memoryContext,
+        messageHistory: memoryContext?.shortTerm || [],
+        userProgress: memoryContext?.episodic || null,
+        conversationStage: null, // Auto-detect
+        userLevel: null // Auto-detect
+      };
+      
       const out = await getMentorResponse(
         mentor,
         actualUserText,
         preset,
-        { ...options, memoryContext }
+        enhancedOptions
       );
       const text = cleanMentorText(out.response);
       
@@ -181,11 +190,20 @@ exports.mentorsChat = async (req, res) => {
         ts: new Date().toISOString()
       })}\n\n`);
 
+      const enhancedOptions = {
+        ...options,
+        memoryContext,
+        messageHistory: memoryContext?.shortTerm || [],
+        userProgress: memoryContext?.episodic || null,
+        conversationStage: null,
+        userLevel: null
+      };
+      
       const out = await getMentorResponse(
         mentor,
         actualUserText,
         preset,
-        { ...options, memoryContext }
+        enhancedOptions
       );
       const text = sanitizeForSSE(cleanMentorText(out.response));
       
