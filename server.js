@@ -15,13 +15,10 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 
 app.use('/api/v1', apiRoutes);
 
-// Initialize memory systems (Redis, Postgres, ChromaDB)
-// Memory is completely optional - server works fine without it
-initMemory().then(() => {
-  console.log('ℹ️ Memory initialization complete (check individual services above)');
-}).catch(err => {
-  console.log('ℹ️ Memory services unavailable, continuing without memory features');
-});
+// Don't initialize memory on startup - let it initialize lazily on first use
+// This prevents connection errors from spamming logs
+// Memory will init on first mentor request
+console.log('ℹ️ Memory services will initialize on first use (lazy loading)');
 
 const server = app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
