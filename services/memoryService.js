@@ -18,46 +18,42 @@ async function initRedis() {
   }
   
   try {
-    const redisUrl = process.env.REDIS_URL;
     console.log(`🔍 Attempting Redis connection...`);
     
-    // Parse URL manually for Railway compatibility
-    // Railway format: redis://default:PASSWORD@host.railway.internal:6379
-    let config = { url: redisUrl };
+    // Railway provides individual variables - use them directly if available
+    const redisHost = process.env.REDIS_HOST || process.env.REDISHOST;
+    const redisPort = process.env.REDIS_PORT || process.env.REDISPORT || 6379;
+    const redisPassword = process.env.REDIS_PASSWORD || process.env.REDISPASSWORD;
+    const redisUser = process.env.REDIS_USER || process.env.REDISUSER || 'default';
     
-    // If URL contains auth, parse it
-    if (redisUrl.includes('@')) {
-      const urlObj = new URL(redisUrl);
+    let config;
+    
+    if (redisHost && redisPassword) {
+      // Use individual env vars (more reliable for Railway)
+      console.log(`📝 Using Redis env vars: ${redisHost}:${redisPort}`);
       config = {
         socket: {
-          host: urlObj.hostname,
-          port: parseInt(urlObj.port) || 6379,
-          reconnectStrategy: false,
-          connectTimeout: 10000
+          host: redisHost,
+          port: parseInt(redisPort),
+          reconnectStrategy: false
+        },
+        password: redisPassword,
+        username: redisUser
+      };
+    } else {
+      // Fallback to REDIS_URL if individual vars not available
+      const redisUrl = process.env.REDIS_URL;
+      console.log(`📝 Using REDIS_URL (parsing...)`);
+      config = {
+        url: redisUrl,
+        socket: {
+          reconnectStrategy: false
         }
       };
-      
-      // Add password if present (Railway uses 'default' username)
-      if (urlObj.password) {
-        config.password = urlObj.password;
-      }
-      
-      // Add username if it's not 'default'
-      if (urlObj.username && urlObj.username !== 'default') {
-        config.username = urlObj.username;
-      }
-      
-      // Handle TLS for rediss://
-      if (redisUrl.startsWith('rediss://')) {
-        config.socket.tls = true;
-      }
-      
-      console.log(`📝 Parsed Redis config: host=${config.socket.host}:${config.socket.port}, hasPassword=${!!config.password}`);
     }
     
     redisClient = redis.createClient(config);
     
-    // Handle connection errors
     redisClient.on('error', (err) => {
       console.log(`❌ Redis error: ${err.code || err.message}`);
     });
@@ -70,8 +66,9 @@ async function initRedis() {
     console.log('✅ Redis connected successfully');
     return redisClient;
   } catch (err) {
-    console.log(`❌ Redis connection failed: ${err.code || err.message}`);
-    console.log('⚠️ Continuing without Redis memory...');
+    console.log(`❌ Redis failed: ${err.code || err.message}`);
+    console.log(`💡 Available Redis vars: REDIS_URL=${!!process.env.REDIS_URL}, REDIS_HOST=${!!process.env.REDIS_HOST}, REDISHOST=${!!process.env.REDISHOST}`);
+    console.log('⚠️ Continuing without Redis...');
     redisClient = null;
     return null;
   }
