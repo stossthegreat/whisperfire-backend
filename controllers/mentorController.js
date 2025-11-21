@@ -1,7 +1,13 @@
 // controllers/mentorController.js
 // Mentor SSE/JSON controller with bullet-proof UTF-8 + spacing + markdown/glyph scrub.
+// Now with full memory integration (Redis, Postgres, ChromaDB)
 
 const { getMentorResponse } = require('../services/aiService');
+const {
+  buildMemoryContext,
+  storeRecentMessage,
+  storeMentorConversation
+} = require('../services/memoryService');
 
 /* ---------- cleaners (order matters) ---------- */
 function killMojibake(s = '') {
@@ -60,8 +66,10 @@ function cleanMentorText(s = '') {
 /* ---------- controller ---------- */
 exports.mentorsChat = async (req, res) => {
   try {
-    const { mentor, user_text, userText, preset, options } = req.body || {};
+    const { mentor, user_text, userText, preset, options, user_id } = req.body || {};
     const actualUserText = user_text || userText;
+    const userId = user_id || 'anonymous'; // Track user for memory
+    const sessionId = req.headers['x-session-id'] || `session_${Date.now()}`;
 
     if (!mentor || !actualUserText || !preset) {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -72,11 +80,67 @@ exports.mentorsChat = async (req, res) => {
     }
 
     const useStream = !!(options && options.stream);
+    
+    // ===== BUILD MEMORY CONTEXT =====
+    let memoryContext = null;
+    try {
+      memoryContext = await buildMemoryContext(userId, mentor, actualUserText);
+    } catch (err) {
+      console.warn('Memory context failed:', err.message);
+    }
+    
+    // Store user message in memory systems
+    try {
+      await storeRecentMessage(userId, mentor, {
+        text: actualUserText,
+        sender: 'user',
+        preset,
+        timestamp: new Date().toISOString()
+      });
+      
+      await storeMentorConversation(
+        userId,
+        mentor,
+        actualUserText,
+        'user',
+        preset,
+        sessionId
+      );
+    } catch (err) {
+      console.warn('Failed to store user message:', err.message);
+    }
 
     if (!useStream) {
-      // JSON mode (clean + utf-8)
-      const out = await getMentorResponse(mentor, actualUserText, preset, options || {});
+      // JSON mode (clean + utf-8) with memory injection
+      const out = await getMentorResponse(
+        mentor,
+        actualUserText,
+        preset,
+        { ...options, memoryContext }
+      );
       const text = cleanMentorText(out.response);
+      
+      // Store mentor response in memory
+      try {
+        await storeRecentMessage(userId, mentor, {
+          text: text,
+          sender: 'mentor',
+          preset,
+          timestamp: new Date().toISOString()
+        });
+        
+        await storeMentorConversation(
+          userId,
+          mentor,
+          text,
+          'mentor',
+          preset,
+          sessionId
+        );
+      } catch (err) {
+        console.warn('Failed to store mentor response:', err.message);
+      }
+      
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       // prevent middlewares/proxies from transforming encoding
       res.setHeader('Cache-Control', 'no-transform');
@@ -112,8 +176,34 @@ exports.mentorsChat = async (req, res) => {
         ts: new Date().toISOString()
       })}\n\n`);
 
-      const out = await getMentorResponse(mentor, actualUserText, preset, options || {});
+      const out = await getMentorResponse(
+        mentor,
+        actualUserText,
+        preset,
+        { ...options, memoryContext }
+      );
       const text = sanitizeForSSE(cleanMentorText(out.response));
+      
+      // Store mentor response in memory
+      try {
+        await storeRecentMessage(userId, mentor, {
+          text: text,
+          sender: 'mentor',
+          preset,
+          timestamp: new Date().toISOString()
+        });
+        
+        await storeMentorConversation(
+          userId,
+          mentor,
+          text,
+          'mentor',
+          preset,
+          sessionId
+        );
+      } catch (err) {
+        console.warn('Failed to store mentor response:', err.message);
+      }
 
       res.write(`data: ${JSON.stringify({
         type: 'wisdom',

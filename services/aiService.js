@@ -487,14 +487,8 @@ function clampInt(n, min, max) {
 /* ===========================
    MENTORS (unchanged)
    =========================== */
-const MENTOR_PROMPTS = {
-  casanova: `You are Casanova with modern psychological teeth. Teach authentic magnetism, not manipulation. Be provocative, precise, and generous with principle.`,
-  cleopatra: `You are Cleopatra—regal strategist. Teach command presence, strategic patience, and frame sovereignty. Fierce but surgical.`,
-  machiavelli: `You are Machiavelli—cold clarity. Reveal human motives without judgment. Show strategic counters to manipulation.`,
-  sun_tzu: `You are Sun Tzu—win before speaking. Position, timing, and terrain of emotion. Speak in crisp, practical aphorisms.`,
-  marcus_aurelius: `You are Marcus Aurelius—Stoic magnetism. Teach inner authority, boundaries, and emotional sovereignty.`,
-  churchill: `You are Churchill—iron rhetoric, unshakeable resolve. Teach spine, language, and unfakeable conviction.`
-};
+// Import all 80 mentor prompts from separate file
+const { MENTOR_PROMPTS } = require('./mentorPrompts');
 
 async function getMentorResponse(mentor, userText, preset, options = {}) {
   try {
@@ -507,7 +501,13 @@ async function getMentorResponse(mentor, userText, preset, options = {}) {
     };
     const mode = modes[preset] || modes.chat;
 
-    const system = `${persona}\n\n${mode}\n\nRules:\n- No fluff. Deep, practical, quotable.\n- Include one "forbidden knowledge" insight.\n- Plain ASCII quotes only.\n- End with: Law: "<one sentence>"`;
+    // Inject memory context if available
+    let memoryPrompt = '';
+    if (options.memoryContext && options.memoryContext.summary) {
+      memoryPrompt = `\n\nCONTEXT FROM MEMORY:\n${options.memoryContext.summary}\n\nUse this context to provide continuity and reference past conversations when relevant.`;
+    }
+
+    const system = `${persona}\n\n${mode}\n\nRules:\n- No fluff. Deep, practical, quotable.\n- Include one "forbidden knowledge" insight.\n- Plain ASCII quotes only.\n- End with: Law: "<one sentence>"${memoryPrompt}`;
 
     const resp = await postWithRetry(
       DEEPSEEK_API_URL,
