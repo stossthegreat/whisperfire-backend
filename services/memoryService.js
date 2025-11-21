@@ -18,21 +18,38 @@ async function initRedis() {
   }
   
   try {
+    // Parse Railway's Redis URL format: redis://default:password@host:port
+    const redisUrl = process.env.REDIS_URL;
+    
     redisClient = redis.createClient({
-      url: process.env.REDIS_URL,
+      url: redisUrl,
       socket: {
-        reconnectStrategy: false // Don't retry on failure
+        reconnectStrategy: false, // Don't retry on failure
+        connectTimeout: 5000
+      },
+      // Railway Redis requires these
+      legacyMode: false,
+      isolationPoolOptions: {
+        min: 1,
+        max: 3
       }
     });
     
-    // Suppress error spam
-    redisClient.on('error', () => {});
+    // Suppress error spam but log first error
+    let errorLogged = false;
+    redisClient.on('error', (err) => {
+      if (!errorLogged) {
+        console.log(`ℹ️ Redis connection issue: ${err.message}`);
+        errorLogged = true;
+      }
+    });
     
     await redisClient.connect();
-    console.log('✅ Redis connected');
+    console.log('✅ Redis connected successfully');
     return redisClient;
   } catch (err) {
-    console.log('ℹ️ Redis unavailable, memory features disabled');
+    console.log(`ℹ️ Redis connection failed: ${err.message || 'unknown error'}`);
+    console.log('ℹ️ Memory features disabled, mentors will work without memory');
     redisClient = null;
     return null;
   }
@@ -85,10 +102,13 @@ async function initPostgres() {
       );
     `);
     
-    console.log('✅ Postgres connected');
+    // Test the connection
+    await pgPool.query('SELECT NOW()');
+    console.log('✅ Postgres connected successfully');
     return pgPool;
   } catch (err) {
-    console.log('ℹ️ Postgres unavailable, memory features disabled');
+    console.log(`ℹ️ Postgres connection failed: ${err.message || 'unknown error'}`);
+    console.log('ℹ️ Memory features disabled, mentors will work without memory');
     pgPool = null;
     return null;
   }
