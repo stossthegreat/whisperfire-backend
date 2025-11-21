@@ -18,29 +18,48 @@ async function initRedis() {
   }
   
   try {
-    // Railway Redis URL format: redis://default:password@host:port
-    // Or rediss:// for TLS
     const redisUrl = process.env.REDIS_URL;
-    
     console.log(`🔍 Attempting Redis connection...`);
     
-    redisClient = redis.createClient({
-      url: redisUrl,
-      socket: {
-        reconnectStrategy: false,
-        connectTimeout: 10000,
-        keepAlive: 5000,
-        tls: redisUrl.startsWith('rediss://') ? {} : undefined
+    // Parse URL manually for Railway compatibility
+    // Railway format: redis://default:PASSWORD@host.railway.internal:6379
+    let config = { url: redisUrl };
+    
+    // If URL contains auth, parse it
+    if (redisUrl.includes('@')) {
+      const urlObj = new URL(redisUrl);
+      config = {
+        socket: {
+          host: urlObj.hostname,
+          port: parseInt(urlObj.port) || 6379,
+          reconnectStrategy: false,
+          connectTimeout: 10000
+        }
+      };
+      
+      // Add password if present (Railway uses 'default' username)
+      if (urlObj.password) {
+        config.password = urlObj.password;
       }
-    });
+      
+      // Add username if it's not 'default'
+      if (urlObj.username && urlObj.username !== 'default') {
+        config.username = urlObj.username;
+      }
+      
+      // Handle TLS for rediss://
+      if (redisUrl.startsWith('rediss://')) {
+        config.socket.tls = true;
+      }
+      
+      console.log(`📝 Parsed Redis config: host=${config.socket.host}:${config.socket.port}, hasPassword=${!!config.password}`);
+    }
+    
+    redisClient = redis.createClient(config);
     
     // Handle connection errors
     redisClient.on('error', (err) => {
       console.log(`❌ Redis error: ${err.code || err.message}`);
-    });
-    
-    redisClient.on('connect', () => {
-      console.log('🔌 Redis connecting...');
     });
     
     redisClient.on('ready', () => {
@@ -52,7 +71,6 @@ async function initRedis() {
     return redisClient;
   } catch (err) {
     console.log(`❌ Redis connection failed: ${err.code || err.message}`);
-    console.log(`📝 Redis URL format check: ${process.env.REDIS_URL ? 'SET' : 'NOT SET'}`);
     console.log('⚠️ Continuing without Redis memory...');
     redisClient = null;
     return null;
@@ -72,13 +90,20 @@ async function initPostgres() {
   }
   
   try {
+    console.log('🔍 Attempting Postgres connection...');
+    
+    // Railway Postgres requires SSL in production
     pgPool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+      ssl: {
+        rejectUnauthorized: false // Railway uses self-signed certs
+      },
       max: 20,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
+      connectionTimeoutMillis: 5000,
     });
+    
+    console.log('📝 Postgres SSL enabled for Railway');
     
     // Create tables if they don't exist
     await pgPool.query(`
