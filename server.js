@@ -15,10 +15,14 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 
 app.use('/api/v1', apiRoutes);
 
-// Don't initialize memory on startup - let it initialize lazily on first use
-// This prevents connection errors from spamming logs
-// Memory will init on first mentor request
-console.log('ℹ️ Memory services will initialize on first use (lazy loading)');
+// Initialize memory systems on startup to test connections
+console.log('🔧 Initializing memory services...');
+initMemory().then(() => {
+  console.log('✅ Memory initialization complete');
+}).catch(err => {
+  console.log(`⚠️ Memory initialization had issues: ${err.message}`);
+  console.log('💡 Mentors will still work without memory features');
+});
 
 const server = app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);

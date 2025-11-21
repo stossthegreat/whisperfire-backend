@@ -18,38 +18,42 @@ async function initRedis() {
   }
   
   try {
-    // Parse Railway's Redis URL format: redis://default:password@host:port
+    // Railway Redis URL format: redis://default:password@host:port
+    // Or rediss:// for TLS
     const redisUrl = process.env.REDIS_URL;
+    
+    console.log(`🔍 Attempting Redis connection...`);
     
     redisClient = redis.createClient({
       url: redisUrl,
       socket: {
-        reconnectStrategy: false, // Don't retry on failure
-        connectTimeout: 5000
-      },
-      // Railway Redis requires these
-      legacyMode: false,
-      isolationPoolOptions: {
-        min: 1,
-        max: 3
+        reconnectStrategy: false,
+        connectTimeout: 10000,
+        keepAlive: 5000,
+        tls: redisUrl.startsWith('rediss://') ? {} : undefined
       }
     });
     
-    // Suppress error spam but log first error
-    let errorLogged = false;
+    // Handle connection errors
     redisClient.on('error', (err) => {
-      if (!errorLogged) {
-        console.log(`ℹ️ Redis connection issue: ${err.message}`);
-        errorLogged = true;
-      }
+      console.log(`❌ Redis error: ${err.code || err.message}`);
+    });
+    
+    redisClient.on('connect', () => {
+      console.log('🔌 Redis connecting...');
+    });
+    
+    redisClient.on('ready', () => {
+      console.log('✅ Redis ready!');
     });
     
     await redisClient.connect();
     console.log('✅ Redis connected successfully');
     return redisClient;
   } catch (err) {
-    console.log(`ℹ️ Redis connection failed: ${err.message || 'unknown error'}`);
-    console.log('ℹ️ Memory features disabled, mentors will work without memory');
+    console.log(`❌ Redis connection failed: ${err.code || err.message}`);
+    console.log(`📝 Redis URL format check: ${process.env.REDIS_URL ? 'SET' : 'NOT SET'}`);
+    console.log('⚠️ Continuing without Redis memory...');
     redisClient = null;
     return null;
   }
@@ -103,12 +107,14 @@ async function initPostgres() {
     `);
     
     // Test the connection
+    console.log('🔍 Testing Postgres connection...');
     await pgPool.query('SELECT NOW()');
     console.log('✅ Postgres connected successfully');
     return pgPool;
   } catch (err) {
-    console.log(`ℹ️ Postgres connection failed: ${err.message || 'unknown error'}`);
-    console.log('ℹ️ Memory features disabled, mentors will work without memory');
+    console.log(`❌ Postgres connection failed: ${err.code || err.message}`);
+    console.log(`📝 DATABASE_URL format check: ${process.env.DATABASE_URL ? 'SET' : 'NOT SET'}`);
+    console.log('⚠️ Continuing without Postgres memory...');
     pgPool = null;
     return null;
   }
