@@ -1,7 +1,7 @@
 // services/memoryService.js — Unified memory system for mentors
 // Short-term (Redis), Episodic (Postgres), Semantic (ChromaDB)
 
-const redis = require('redis');
+const Redis = require('ioredis'); // Using ioredis instead of redis (better Railway compatibility)
 const { Pool } = require('pg');
 const { ChromaClient } = require('chromadb');
 
@@ -18,57 +18,35 @@ async function initRedis() {
   }
   
   try {
-    console.log(`🔍 Attempting Redis connection...`);
+    console.log(`🔍 Attempting Redis connection with ioredis...`);
     
-    const redisUrl = process.env.REDIS_URL;
-    if (!redisUrl) {
-      console.log('ℹ️ No REDIS_URL, skipping...');
-      return null;
-    }
-    
-    // MANUALLY parse the URL completely
-    // Railway format: redis://default:PASSWORD@redis.railway.internal:6379
-    const url = new URL(redisUrl);
-    const host = url.hostname;
-    const port = parseInt(url.port) || 6379;
-    const password = decodeURIComponent(url.password); // IMPORTANT: Decode password
-    const username = url.username || 'default';
-    const useTLS = url.protocol === 'rediss:';
-    
-    console.log(`📝 Parsed: ${host}:${port}, user=${username}, hasPW=${!!password}, TLS=${useTLS}`);
-    
-    const config = {
-      socket: {
-        host: host,
-        port: port,
-        reconnectStrategy: false,
-        tls: useTLS
-      }
-    };
-    
-    // Railway Redis v7 uses ACL - ALWAYS set username AND password
-    if (password && password !== '') {
-      config.password = password;
-      // For ACL auth, username is REQUIRED (even if it's 'default')
-      config.username = username || 'default';
-    }
-    
-    redisClient = redis.createClient(config);
+    // ioredis handles Railway URLs MUCH better than node-redis
+    redisClient = new Redis(process.env.REDIS_URL, {
+      maxRetriesPerRequest: 3,
+      enableReadyCheck: true,
+      lazyConnect: false,
+      connectTimeout: 10000
+    });
     
     redisClient.on('error', (err) => {
-      console.log(`❌ Redis error: ${err.code || err.message}`);
+      console.log(`❌ Redis error: ${err.message}`);
     });
     
     redisClient.on('ready', () => {
-      console.log('✅ Redis ready!');
+      console.log('✅ Redis connected successfully!');
     });
     
-    await redisClient.connect();
-    console.log('✅ Redis connected successfully!');
+    // Test connection
+    await redisClient.ping();
+    console.log('✅ Redis ping successful!');
+    
     return redisClient;
   } catch (err) {
-    console.log(`❌ Redis failed: ${err.code || err.message}`);
+    console.log(`❌ Redis failed: ${err.message}`);
     console.log('⚠️ Continuing without Redis...');
+    if (redisClient) {
+      redisClient.disconnect();
+    }
     redisClient = null;
     return null;
   }
@@ -195,7 +173,7 @@ async function getRecentConversation(userId, mentorId, limit = 10) {
     if (!redisClient) return [];
     
     const key = `conversation:${userId}:${mentorId}`;
-    const messages = await redisClient.lRange(key, 0, limit - 1);
+    const messages = await redisClient.lrange(key, 0, limit - 1); // ioredis uses lowercase
     return messages.map(m => JSON.parse(m)).reverse();
   } catch (err) {
     // Silent fail - memory optional
@@ -208,8 +186,8 @@ async function storeRecentMessage(userId, mentorId, message) {
     if (!redisClient) return;
     
     const key = `conversation:${userId}:${mentorId}`;
-    await redisClient.lPush(key, JSON.stringify(message));
-    await redisClient.lTrim(key, 0, 49); // Keep last 50 messages
+    await redisClient.lpush(key, JSON.stringify(message)); // ioredis uses lowercase
+    await redisClient.ltrim(key, 0, 49); // Keep last 50 messages
     await redisClient.expire(key, 86400 * 7); // 7 days TTL
   } catch (err) {
     // Silent fail - memory optional

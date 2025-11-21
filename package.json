@@ -18,7 +18,7 @@
     "firebase-admin": "^11.11.0",
     "axios": "^1.6.0",
     "dotenv": "^16.3.1",
-    "redis": "^4.6.0",
+    "ioredis": "^5.3.2",
     "pg": "^8.11.0",
     "chromadb": "^1.8.0"
   },
