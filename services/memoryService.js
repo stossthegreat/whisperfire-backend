@@ -20,36 +20,40 @@ async function initRedis() {
   try {
     console.log(`🔍 Attempting Redis connection...`);
     
-    // Railway provides individual variables - use them directly if available
-    const redisHost = process.env.REDIS_HOST || process.env.REDISHOST;
-    const redisPort = process.env.REDIS_PORT || process.env.REDISPORT || 6379;
-    const redisPassword = process.env.REDIS_PASSWORD || process.env.REDISPASSWORD;
-    const redisUser = process.env.REDIS_USER || process.env.REDISUSER || 'default';
+    const redisUrl = process.env.REDIS_URL;
+    if (!redisUrl) {
+      console.log('ℹ️ No REDIS_URL, skipping...');
+      return null;
+    }
     
-    let config;
+    // MANUALLY parse the URL completely
+    // Railway format: redis://default:PASSWORD@redis.railway.internal:6379
+    const url = new URL(redisUrl);
+    const host = url.hostname;
+    const port = parseInt(url.port) || 6379;
+    const password = decodeURIComponent(url.password); // IMPORTANT: Decode password
+    const username = url.username || 'default';
+    const useTLS = url.protocol === 'rediss:';
     
-    if (redisHost && redisPassword) {
-      // Use individual env vars (more reliable for Railway)
-      console.log(`📝 Using Redis env vars: ${redisHost}:${redisPort}`);
-      config = {
-        socket: {
-          host: redisHost,
-          port: parseInt(redisPort),
-          reconnectStrategy: false
-        },
-        password: redisPassword,
-        username: redisUser
-      };
-    } else {
-      // Fallback to REDIS_URL if individual vars not available
-      const redisUrl = process.env.REDIS_URL;
-      console.log(`📝 Using REDIS_URL (parsing...)`);
-      config = {
-        url: redisUrl,
-        socket: {
-          reconnectStrategy: false
-        }
-      };
+    console.log(`📝 Parsed: ${host}:${port}, user=${username}, hasPW=${!!password}, TLS=${useTLS}`);
+    
+    const config = {
+      socket: {
+        host: host,
+        port: port,
+        reconnectStrategy: false,
+        tls: useTLS
+      }
+    };
+    
+    // Only add password if it exists and isn't empty
+    if (password && password !== '') {
+      config.password = password;
+    }
+    
+    // Only add username if it's not 'default' (redis default)
+    if (username && username !== 'default' && username !== '') {
+      config.username = username;
     }
     
     redisClient = redis.createClient(config);
@@ -63,11 +67,10 @@ async function initRedis() {
     });
     
     await redisClient.connect();
-    console.log('✅ Redis connected successfully');
+    console.log('✅ Redis connected successfully!');
     return redisClient;
   } catch (err) {
     console.log(`❌ Redis failed: ${err.code || err.message}`);
-    console.log(`💡 Available Redis vars: REDIS_URL=${!!process.env.REDIS_URL}, REDIS_HOST=${!!process.env.REDIS_HOST}, REDISHOST=${!!process.env.REDISHOST}`);
     console.log('⚠️ Continuing without Redis...');
     redisClient = null;
     return null;
