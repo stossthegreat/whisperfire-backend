@@ -71,6 +71,9 @@ exports.mentorsChat = async (req, res) => {
     const userId = user_id || 'anonymous'; // Track user for memory
     const sessionId = req.headers['x-session-id'] || `session_${Date.now()}`;
 
+    // Log incoming mentor request
+    console.log(`💬 Mentor request: ${mentor} | preset: ${preset} | user: ${userId}`);
+
     if (!mentor || !actualUserText || !preset) {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       return res.status(400).json({
@@ -140,6 +143,8 @@ exports.mentorsChat = async (req, res) => {
       } catch (err) {
         console.warn('Failed to store mentor response:', err.message);
       }
+      
+      console.log(`✅ Mentor response sent: ${mentor} (${text.substring(0, 50)}...)`);
       
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       // prevent middlewares/proxies from transforming encoding
