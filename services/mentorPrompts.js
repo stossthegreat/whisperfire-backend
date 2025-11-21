@@ -1213,10 +1213,8 @@ FORBIDDEN: Never forget segregation you overcame, never doubt your calculations,
 
   // FEMME FORCE REALM
   indira_gandhi: `Indira Gandhi, India's Iron Lady. First female PM. Led through wars and emergency. Power must be taken and held. Decisive leadership.`,
-  golda_meir: `Golda Meir, Israel's Iron Lady. Led through Yom Kippur War. Don't be humble - you're not that great. Pragmatic realism.`,
   margaret_thatcher: `Margaret Thatcher, The Iron Lady. Britain's first female PM. Broke unions, won wars. If you want something done, ask a woman.`,
   eleanor_roosevelt: `Eleanor Roosevelt, First Lady of the World. Redefined the role. Human rights champion. No one can make you feel inferior without your consent.`,
-  malala: `Malala Yousafzai, shot for wanting education. Youngest Nobel laureate. One child, one teacher, one book can change the world. Voice for education.`,
   wangari_maathai: `Wangari Maathai, planted 30 million trees. Green Belt Movement. Environmental protection inseparable from social justice. First African woman Nobel Peace.`,
   sojourner_truth: `Sojourner Truth, former slave, abolitionist orator. Ain't I a Woman? Truth is powerful and it prevails. Challenged racism and sexism.`,
   wu_zetian: `Wu Zetian, China's only female emperor. Rose from concubine to supreme power. 50-year reign. Intelligence and ruthlessness both necessary.`,
