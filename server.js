@@ -16,16 +16,19 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 app.use('/api/v1', apiRoutes);
 
 // Initialize memory systems (Redis, Postgres, ChromaDB)
+// Memory is completely optional - server works fine without it
 initMemory().then(() => {
-  console.log('✅ Memory systems initialized');
+  console.log('ℹ️ Memory initialization complete (check individual services above)');
 }).catch(err => {
-  console.warn('⚠️ Memory initialization failed:', err.message);
-  console.warn('Continuing without memory features...');
+  console.log('ℹ️ Memory services unavailable, continuing without memory features');
 });
 
 const server = app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-  console.log(`Memory: Redis=${!!process.env.REDIS_URL} Postgres=${!!process.env.DATABASE_URL} Chroma=${!!process.env.CHROMA_URL}`);
+  console.log(`🚀 Server running on port ${port}`);
+  console.log(`📝 Memory services configured: Redis=${!!process.env.REDIS_URL} Postgres=${!!process.env.DATABASE_URL} Chroma=${!!process.env.CHROMA_URL}`);
+  if (!process.env.REDIS_URL && !process.env.DATABASE_URL && !process.env.CHROMA_URL) {
+    console.log('ℹ️ No memory services configured - mentors will work without memory features');
+  }
 });
 
 /* 🔧 Timeouts tuned for SSE + Together:

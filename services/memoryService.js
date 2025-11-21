@@ -11,20 +11,29 @@ let redisClient = null;
 async function initRedis() {
   if (redisClient) return redisClient;
   
+  // Skip Redis if no URL provided
+  if (!process.env.REDIS_URL) {
+    console.log('ℹ️ Redis not configured (no REDIS_URL), skipping...');
+    return null;
+  }
+  
   try {
     redisClient = redis.createClient({
-      url: process.env.REDIS_URL || 'redis://localhost:6379',
+      url: process.env.REDIS_URL,
       socket: {
-        reconnectStrategy: (retries) => Math.min(retries * 50, 500)
+        reconnectStrategy: false // Don't retry on failure
       }
     });
     
-    redisClient.on('error', (err) => console.error('Redis Error:', err));
+    // Suppress error spam
+    redisClient.on('error', () => {});
+    
     await redisClient.connect();
     console.log('✅ Redis connected');
     return redisClient;
   } catch (err) {
-    console.warn('⚠️ Redis unavailable, using in-memory fallback');
+    console.log('ℹ️ Redis unavailable, memory features disabled');
+    redisClient = null;
     return null;
   }
 }
@@ -34,6 +43,12 @@ let pgPool = null;
 
 async function initPostgres() {
   if (pgPool) return pgPool;
+  
+  // Skip Postgres if no URL provided
+  if (!process.env.DATABASE_URL) {
+    console.log('ℹ️ Postgres not configured (no DATABASE_URL), skipping...');
+    return null;
+  }
   
   try {
     pgPool = new Pool({
@@ -73,7 +88,8 @@ async function initPostgres() {
     console.log('✅ Postgres connected');
     return pgPool;
   } catch (err) {
-    console.warn('⚠️ Postgres unavailable:', err.message);
+    console.log('ℹ️ Postgres unavailable, memory features disabled');
+    pgPool = null;
     return null;
   }
 }
@@ -85,9 +101,15 @@ let mentorCollection = null;
 async function initChroma() {
   if (chromaClient) return chromaClient;
   
+  // Skip ChromaDB if no URL provided
+  if (!process.env.CHROMA_URL) {
+    console.log('ℹ️ ChromaDB not configured (no CHROMA_URL), skipping...');
+    return null;
+  }
+  
   try {
     chromaClient = new ChromaClient({
-      path: process.env.CHROMA_URL || 'http://localhost:8000'
+      path: process.env.CHROMA_URL
     });
     
     // Create or get mentor knowledge collection
@@ -98,12 +120,14 @@ async function initChroma() {
       });
       console.log('✅ ChromaDB connected');
     } catch (err) {
-      console.warn('⚠️ ChromaDB collection error:', err.message);
+      console.log('ℹ️ ChromaDB collection unavailable');
+      chromaClient = null;
     }
     
     return chromaClient;
   } catch (err) {
-    console.warn('⚠️ ChromaDB unavailable:', err.message);
+    console.log('ℹ️ ChromaDB unavailable, memory features disabled');
+    chromaClient = null;
     return null;
   }
 }
@@ -126,7 +150,7 @@ async function getRecentConversation(userId, mentorId, limit = 10) {
     const messages = await redisClient.lRange(key, 0, limit - 1);
     return messages.map(m => JSON.parse(m)).reverse();
   } catch (err) {
-    console.error('Redis get error:', err);
+    // Silent fail - memory optional
     return [];
   }
 }
@@ -140,7 +164,7 @@ async function storeRecentMessage(userId, mentorId, message) {
     await redisClient.lTrim(key, 0, 49); // Keep last 50 messages
     await redisClient.expire(key, 86400 * 7); // 7 days TTL
   } catch (err) {
-    console.error('Redis store error:', err);
+    // Silent fail - memory optional
   }
 }
 
@@ -156,7 +180,7 @@ async function getUserMentorHistory(userId, mentorId) {
     
     return result.rows[0] || null;
   } catch (err) {
-    console.error('Postgres get error:', err);
+    // Silent fail - memory optional
     return null;
   }
 }
@@ -183,7 +207,7 @@ async function storeMentorConversation(userId, mentorId, messageText, sender, pr
       [userId, mentorId]
     );
   } catch (err) {
-    console.error('Postgres store error:', err);
+    // Silent fail - memory optional
   }
 }
 
@@ -201,7 +225,7 @@ async function getPastInsights(userId, mentorId, limit = 5) {
     
     return result.rows;
   } catch (err) {
-    console.error('Postgres insights error:', err);
+    // Silent fail - memory optional
     return [];
   }
 }
@@ -219,7 +243,7 @@ async function queryMentorKnowledge(mentorId, query, limit = 3) {
     
     return results.documents[0] || [];
   } catch (err) {
-    console.error('ChromaDB query error:', err);
+    // Silent fail - memory optional
     return [];
   }
 }
@@ -239,7 +263,7 @@ async function storeMentorKnowledge(mentorId, mentorName, knowledge) {
       metadatas
     });
   } catch (err) {
-    console.error('ChromaDB store error:', err);
+    // Silent fail - memory optional
   }
 }
 
@@ -286,7 +310,7 @@ async function buildMemoryContext(userId, mentorId, userMessage) {
     context.summary = parts.join('\n\n');
     
   } catch (err) {
-    console.error('Memory context error:', err);
+    // Silent fail - memory optional
   }
   
   return context;
